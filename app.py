@@ -16,7 +16,7 @@ raw_notes = st.text_area("Ghi chú công việc", height=100)
 
 if st.button("Phân tích Kế hoạch"):
     if raw_notes:
-        parsed = analyze_user_notes(raw_notes, st.secrets["GEMINI_API_KEY"])
+        parsed = analyze_user_notes(raw_notes, st.secrets["OPENROUTER_API_KEY"])
         for item in parsed:
             item["task_id"] = f"task_{str(uuid.uuid4())[:6]}"
             item["is_done"] = False
