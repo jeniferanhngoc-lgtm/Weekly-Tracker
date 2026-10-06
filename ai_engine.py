@@ -2,7 +2,7 @@ import json
 import time
 import google.genai as genai
 from google.genai import types
-from google.genai.errors import APIError
+from google.genai.errors import ClientError, ServerError
 
 def analyze_user_notes(raw_text: str, api_key: str):
     client = genai.Client(api_key=api_key)
@@ -16,13 +16,13 @@ def analyze_user_notes(raw_text: str, api_key: str):
     - subtasks: Khung sườn hoặc các bước thực hiện
     """
     
-    # Chỉ sử dụng các model được hỗ trợ chính thức trong SDK google-genai
-    candidate_models = ['gemini-2.5-flash', 'gemini-2.0-flash']
+    # gemini-3.8-flash là mô hình chính thức được Google AI khuyến nghị
+    candidate_models = ['gemini-3.8-flash', 'gemini-2.0-flash']
     
     last_exception = None
     for model_name in candidate_models:
-        # Thử lại tối đa 2 lần cho mỗi model nếu gặp lỗi quá tải (503/429)
-        for attempt in range(2):
+        # Thử tối đa 3 lần cho mỗi model
+        for attempt in range(3):
             try:
                 response = client.models.generate_content(
                     model=model_name,
@@ -33,16 +33,18 @@ def analyze_user_notes(raw_text: str, api_key: str):
                     )
                 )
                 return json.loads(response.text)
-            except APIError as e:
+            except ServerError as e:
+                # Nếu gặp lỗi quá tải server (503/500), chờ tăng dần (2s, 4s, 6s) rồi thử lại
                 last_exception = e
-                # Nếu là lỗi quá tải (503) hoặc chạm giới hạn (429), tạm dừng 2 giây rồi thử lại
-                if e.code in [503, 429]:
-                    time.sleep(2)
-                    continue
-                # Nếu gặp lỗi khác (như 404), chuyển ngay sang model tiếp theo
+                time.sleep(2 * (attempt + 1))
+                continue
+            except ClientError as e:
+                # Nếu gặp lỗi Client (404/400), bỏ qua model này và thử model tiếp theo ngay lập tức
+                last_exception = e
                 break
             except Exception as e:
                 last_exception = e
-                break
+                time.sleep(1)
+                continue
             
     raise last_exception
