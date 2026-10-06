@@ -1,4 +1,3 @@
-# ai_engine.py
 import json
 import google.genai as genai
 from google.genai import types
@@ -15,7 +14,7 @@ def analyze_user_notes(raw_text: str, api_key: str):
     - subtasks: Khung sườn hoặc các bước thực hiện
     """
     response = client.models.generate_content(
-        model='gemini-2.5-flash',  # Đảm bảo tên model chính xác
+        model='gemini-2.5-flash',
         contents=raw_text,
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
