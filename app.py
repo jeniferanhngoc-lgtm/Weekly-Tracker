@@ -46,7 +46,7 @@ if st.button("Phân tích ghi chú", type="primary"):
                         processed_tasks.append(item)
 
                 if processed_tasks:
-                    append_tasks_to_history(processed_tasks)
+                    append_tasks_to_history(st.secrets["14Sm3SZhaoV-MOwFuH0C2qNZYN_KB5wKFPpZNh8fq4Y8"], processed_tasks)
                     st.success(f"Đã phân tích và lưu thành công {len(processed_tasks)} công việc vào Google Sheets!")
                     st.subheader("Công việc đã trích xuất:")
                     st.dataframe(processed_tasks, use_container_width=True)
