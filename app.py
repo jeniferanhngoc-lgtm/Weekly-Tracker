@@ -41,10 +41,11 @@ col3.metric("Chưa hoàn thành", pending_tasks)
 st.progress(overall_percent / 100 if total_tasks > 0 else 0.0)
 st.divider()
 
+# Đã bỏ placeholder để tránh lỗi phiên bản Streamlit
 column_config = {
     "Tên công việc": st.column_config.TextColumn("Công việc", required=True, width="large"),
     "Mức độ ưu tiên": st.column_config.SelectboxColumn("Mức độ ưu tiên", options=["Cao", "Trung bình", "Thấp"], default="Trung bình", width="medium"),
-    "Deadline": st.column_config.TextColumn("Deadline (nếu có)", placeholder="Ví dụ: 17h Thứ 6 hoặc 10/10", width="medium"),
+    "Deadline": st.column_config.TextColumn("Deadline (nếu có)", width="medium"),
     "Đã xong": st.column_config.CheckboxColumn("Đã xong", default=False, width="small")
 }
 
