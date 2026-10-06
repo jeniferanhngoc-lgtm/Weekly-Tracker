@@ -2,6 +2,7 @@ import json
 import time
 import google.genai as genai
 from google.genai import types
+from google.genai.errors import APIError
 
 def analyze_user_notes(raw_text: str, api_key: str):
     client = genai.Client(api_key=api_key)
@@ -15,26 +16,33 @@ def analyze_user_notes(raw_text: str, api_key: str):
     - subtasks: Khung sườn hoặc các bước thực hiện
     """
     
-    # Danh sách các mô hình dự phòng theo thứ tự ưu tiên
-    candidate_models = ['gemini-3.8-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    # Chỉ sử dụng các model được hỗ trợ chính thức trong SDK google-genai
+    candidate_models = ['gemini-2.5-flash', 'gemini-2.0-flash']
     
     last_exception = None
     for model_name in candidate_models:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=raw_text,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_mime_type="application/json"
+        # Thử lại tối đa 2 lần cho mỗi model nếu gặp lỗi quá tải (503/429)
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=raw_text,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json"
+                    )
                 )
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            last_exception = e
-            # Nếu gặp lỗi 503 (quá tải), chờ 1 giây rồi thử mô hình tiếp theo
-            time.sleep(1)
-            continue
+                return json.loads(response.text)
+            except APIError as e:
+                last_exception = e
+                # Nếu là lỗi quá tải (503) hoặc chạm giới hạn (429), tạm dừng 2 giây rồi thử lại
+                if e.code in [503, 429]:
+                    time.sleep(2)
+                    continue
+                # Nếu gặp lỗi khác (như 404), chuyển ngay sang model tiếp theo
+                break
+            except Exception as e:
+                last_exception = e
+                break
             
-    # Nếu tất cả các mô hình đều lỗi, báo ngoại lệ cuối cùng
     raise last_exception
