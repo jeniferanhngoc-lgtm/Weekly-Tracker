@@ -1,57 +1,68 @@
-import uuid
 import streamlit as st
-from ai_engine import analyze_user_notes
-from sheets_db import append_tasks_to_history
+import pandas as pd
+from sheets_db import load_tasks, save_tasks
 
-st.set_page_config(
-    page_title="AI Weekly Planner",
-    layout="wide"
-)
+st.set_page_config(page_title="Weekly Planner", layout="wide")
 
-st.title("AI Weekly Planner & Task Extractor")
-st.markdown("Dán đoạn ghi chú hoặc danh sách công việc vào ô bên dưới để AI tự động trích xuất và đồng bộ vào Google Sheets.")
+st.title("Quản lý Công việc Tuần")
+
+if "df_tasks" not in st.session_state:
+    st.session_state.df_tasks = load_tasks()
+
+df = st.session_state.df_tasks
+
+total_tasks = len(df)
+completed_tasks = int(df["Trạng thái"].sum()) if total_tasks > 0 and "Trạng thái" in df.columns else 0
+percent_completed = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0.0
+pending_tasks = total_tasks - completed_tasks
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Tổng công việc", total_tasks)
+col2.metric("Đã hoàn thành", f"{completed_tasks} ({percent_completed:.1f}%)")
+col3.metric("Chưa hoàn thành", pending_tasks)
 
 st.divider()
 
-raw_notes = st.text_area(
-    label="Ghi chú tuần / Công việc cần làm:",
-    height=200,
-    placeholder="Ví dụ:\n- Họp nhóm nghiên cứu thiết kế vào 9h sáng mai (P1)\n- Hoàn thành báo cáo tiến độ tuần này trước thứ 6"
+st.subheader("Danh sách công việc")
+
+edited_df = st.data_editor(
+    df,
+    num_rows="dynamic",
+    use_container_width=True,
+    column_config={
+        "Trạng thái": st.column_config.CheckboxColumn(
+            "Đã xong",
+            default=False
+        ),
+        "Tên công việc": st.column_config.TextColumn(
+            "Tên công việc",
+            required=True
+        ),
+        "Ưu tiên": st.column_config.SelectboxColumn(
+            "Mức độ ưu tiên",
+            options=["P1", "P2", "P3"],
+            default="P2"
+        )
+    }
 )
 
-if st.button("Phân tích ghi chú", type="primary"):
-    if not raw_notes.strip():
-        st.warning("Vui lòng nhập nội dung ghi chú trước khi phân tích.")
+if st.button("Lưu vào Google Sheets", type="primary"):
+    save_tasks(edited_df)
+    st.session_state.df_tasks = edited_df
+    st.success("Đã lưu dữ liệu và cập nhật Google Sheets thành công.")
+    st.rerun()
+
+st.divider()
+
+if total_tasks > 0:
+    st.subheader("Báo cáo tiến độ")
+    st.progress(percent_completed / 100)
+    
+    if pending_tasks > 0:
+        st.write("Các công việc chưa hoàn thành:")
+        pending_df = edited_df[~edited_df["Trạng thái"]]
+        for _, row in pending_df.iterrows():
+            if row["Tên công việc"]:
+                st.write(f"- {row['Tên công việc']} (Ưu tiên: {row.get('Ưu tiên', 'N/A')}, Hạn chót: {row.get('Hạn chót', 'N/A')})")
     else:
-        with st.spinner("AI đang phân tích và trích xuất danh sách công việc..."):
-            try:
-                api_key = st.secrets.get("OPENROUTER_API_KEY") or st.secrets.get("GROQ_API_KEY") or st.secrets.get("GEMINI_API_KEY")
-                if not api_key:
-                    st.error("Không tìm thấy API Key trong Streamlit Secrets!")
-                    st.stop()
-
-                parsed = analyze_user_notes(raw_notes, api_key)
-                
-                if isinstance(parsed, dict) and "tasks" in parsed:
-                    tasks_list = parsed["tasks"]
-                elif isinstance(parsed, list):
-                    tasks_list = parsed
-                else:
-                    tasks_list = []
-
-                processed_tasks = []
-                for item in tasks_list:
-                    if isinstance(item, dict):
-                        item["task_id"] = f"task_{str(uuid.uuid4())[:6]}"
-                        processed_tasks.append(item)
-
-                if processed_tasks:
-                    append_tasks_to_history(st.secrets["14Sm3SZhaoV-MOwFuH0C2qNZYN_KB5wKFPpZNh8fq4Y8"], processed_tasks)
-                    st.success(f"Đã phân tích và lưu thành công {len(processed_tasks)} công việc vào Google Sheets!")
-                    st.subheader("Công việc đã trích xuất:")
-                    st.dataframe(processed_tasks, use_container_width=True)
-                else:
-                    st.warning("AI không tìm thấy công việc nào hợp lệ trong ghi chú.")
-
-            except Exception as e:
-                st.error(f"Xảy ra lỗi trong quá trình xử lý: {str(e)}")
+        st.info("Tất cả công việc trong tuần đã hoàn thành.")
