@@ -2,7 +2,7 @@ import gspread
 import pandas as pd
 import streamlit as st
 
-COLUMNS = ["Tên công việc", "Mức độ ưu tiên", "Deadline", "Đã xong"]
+COLUMNS = ["Tên công việc", "Mức độ ưu tiên", "Deadline", "Trạng thái"]
 
 def load_weekly_sheet(year: int, week: int):
     """Tải danh sách công việc của tuần được chọn từ Google Sheets."""
@@ -28,12 +28,17 @@ def load_weekly_sheet(year: int, week: int):
         if df_filtered.empty:
             return pd.DataFrame(columns=COLUMNS)
         
-        if "Đã xong" in df_filtered.columns:
-            df_filtered["Đã xong"] = df_filtered["Đã xong"].apply(
+        # Đồng bộ dữ liệu cũ (nếu có cột "Đã xong" thì chuyển về "Trạng thái")
+        if "Trạng thái" in df_filtered.columns:
+            df_filtered["Trạng thái"] = df_filtered["Trạng thái"].apply(
+                lambda x: True if str(x).lower() in ["true", "1", "x", "hoàn thành"] else False
+            )
+        elif "Đã xong" in df_filtered.columns:
+            df_filtered["Trạng thái"] = df_filtered["Đã xong"].apply(
                 lambda x: True if str(x).lower() in ["true", "1", "x", "hoàn thành"] else False
             )
         else:
-            df_filtered["Đã xong"] = False
+            df_filtered["Trạng thái"] = False
             
         return df_filtered[COLUMNS]
     except Exception:
