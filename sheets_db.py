@@ -2,21 +2,20 @@ import gspread
 import pandas as pd
 import streamlit as st
 
-DAYS = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ Nhật"]
-COLUMNS = ["Tên công việc", "Mức ưu tiên"] + DAYS
+COLUMNS = ["Tên công việc", "Mức độ ưu tiên", "Deadline", "Đã xong"]
 
 def load_weekly_sheet(year: int, week: int):
-    """Tải dữ liệu của một tuần cụ thể từ Google Sheets."""
+    """Tải danh sách công việc của tuần được chọn từ Google Sheets."""
     try:
         spreadsheet_id = st.secrets["spreadsheet_id"]
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         sh = gc.open_by_key(spreadsheet_id)
         
         try:
-            worksheet = sh.worksheet("Weekly_Grid_History")
+            worksheet = sh.worksheet("Simple_Weekly_Tasks")
         except gspread.exceptions.WorksheetNotFound:
-            worksheet = sh.add_worksheet(title="Weekly_Grid_History", rows="500", cols="15")
-            worksheet.append_row(["Năm", "Tuần"] + COLUMNS + ["% Hoàn thành"])
+            worksheet = sh.add_worksheet(title="Simple_Weekly_Tasks", rows="500", cols="10")
+            worksheet.append_row(["Năm", "Tuần", "Mốc thời gian"] + COLUMNS)
             return pd.DataFrame(columns=COLUMNS)
 
         data = worksheet.get_all_records()
@@ -24,56 +23,47 @@ def load_weekly_sheet(year: int, week: int):
             return pd.DataFrame(columns=COLUMNS)
         
         df_all = pd.DataFrame(data)
-        
-        # Lọc đúng dữ liệu của Năm và Tuần được chọn
         df_filtered = df_all[(df_all["Năm"] == year) & (df_all["Tuần"] == week)].copy()
         
         if df_filtered.empty:
             return pd.DataFrame(columns=COLUMNS)
         
-        for day in DAYS:
-            if day in df_filtered.columns:
-                df_filtered[day] = df_filtered[day].apply(
-                    lambda x: True if str(x).lower() in ["true", "1", "x", "hoàn thành"] else False
-                )
-            else:
-                df_filtered[day] = False
-                
+        if "Đã xong" in df_filtered.columns:
+            df_filtered["Đã xong"] = df_filtered["Đã xong"].apply(
+                lambda x: True if str(x).lower() in ["true", "1", "x", "hoàn thành"] else False
+            )
+        else:
+            df_filtered["Đã xong"] = False
+            
         return df_filtered[COLUMNS]
     except Exception:
         return pd.DataFrame(columns=COLUMNS)
 
 
-def save_weekly_sheet(year: int, week: int, df_current: pd.DataFrame):
-    """Cập nhật hoặc thêm mới dữ liệu của tuần được chọn vào Google Sheets."""
+def save_weekly_sheet(year: int, week: int, time_range_str: str, df_current: pd.DataFrame):
+    """Lưu danh sách công việc của tuần vào Google Sheets."""
     spreadsheet_id = st.secrets["spreadsheet_id"]
     gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
     sh = gc.open_by_key(spreadsheet_id)
     
     try:
-        worksheet = sh.worksheet("Weekly_Grid_History")
+        worksheet = sh.worksheet("Simple_Weekly_Tasks")
     except gspread.exceptions.WorksheetNotFound:
-        worksheet = sh.add_worksheet(title="Weekly_Grid_History", rows="500", cols="15")
-        worksheet.append_row(["Năm", "Tuần"] + COLUMNS + ["% Hoàn thành"])
+        worksheet = sh.add_worksheet(title="Simple_Weekly_Tasks", rows="500", cols="10")
+        worksheet.append_row(["Năm", "Tuần", "Mốc thời gian"] + COLUMNS)
 
     data = worksheet.get_all_records()
     if data:
         df_all = pd.DataFrame(data)
-        # Xóa dữ liệu cũ của tuần này để ghi đè bản mới nhất
         df_other = df_all[~((df_all["Năm"] == year) & (df_all["Tuần"] == week))].copy()
     else:
-        df_other = pd.DataFrame(columns=["Năm", "Tuần"] + COLUMNS + ["% Hoàn thành"])
+        df_other = pd.DataFrame(columns=["Năm", "Tuần", "Mốc thời gian"] + COLUMNS)
 
-    # Chuẩn bị dữ liệu tuần hiện tại
     df_save = df_current.copy()
     df_save.insert(0, "Năm", year)
     df_save.insert(1, "Tuần", week)
-    
-    # Tính % hoàn thành từng công việc
-    days_checked = df_save[DAYS].sum(axis=1)
-    df_save["% Hoàn thành"] = days_checked.apply(lambda x: f"{(x / 7 * 100):.1f}%" if x > 0 else "0.0%")
+    df_save.insert(2, "Mốc thời gian", time_range_str)
 
-    # Gộp dữ liệu tuần này với lịch sử các tuần khác
     df_final = pd.concat([df_other, df_save], ignore_index=True)
     
     worksheet.clear()
