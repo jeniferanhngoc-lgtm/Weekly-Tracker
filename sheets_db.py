@@ -7,7 +7,7 @@ COLUMNS = ["Tên công việc", "Mức độ ưu tiên", "Deadline", "Trạng th
 def load_weekly_sheet(year: int, week: int):
     """Tải danh sách công việc của tuần được chọn từ Google Sheets."""
     try:
-        spreadsheet_id = st.secrets["spreadsheet_id"]
+        spreadsheet_id = st.secrets["14Sm3SZhaoV-MOwFuH0C2qNZYN_KB5wKFPpZNh8fq4Y8"]
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         sh = gc.open_by_key(spreadsheet_id)
         
