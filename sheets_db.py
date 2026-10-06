@@ -2,39 +2,56 @@ import gspread
 import pandas as pd
 import streamlit as st
 
-def get_worksheet(sheet_name):
+DAYS = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ Nhật"]
+COLUMNS = ["Tên công việc", "Mức ưu tiên"] + DAYS
+
+def load_weekly_sheet():
+    try:
+        spreadsheet_id = st.secrets["spreadsheet_id"]
+        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+        sh = gc.open_by_key(spreadsheet_id)
+        
+        try:
+            worksheet = sh.worksheet("Weekly_Grid")
+        except gspread.exceptions.WorksheetNotFound:
+            worksheet = sh.add_worksheet(title="Weekly_Grid", rows="50", cols="15")
+            worksheet.append_row(COLUMNS)
+            return pd.DataFrame(columns=COLUMNS)
+
+        data = worksheet.get_all_records()
+        if not data:
+            return pd.DataFrame(columns=COLUMNS)
+        
+        df = pd.DataFrame(data)
+        # Chuyển dữ liệu các ngày về kiểu boolean cho checkbox
+        for day in DAYS:
+            if day in df.columns:
+                df[day] = df[day].apply(lambda x: True if str(x).lower() in ["true", "1", "x", "hoàn thành"] else False)
+            else:
+                df[day] = False
+                
+        return df[COLUMNS]
+    except Exception:
+        return pd.DataFrame(columns=COLUMNS)
+
+def save_weekly_sheet(df):
     spreadsheet_id = st.secrets["spreadsheet_id"]
     gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
     sh = gc.open_by_key(spreadsheet_id)
     
     try:
-        return sh.worksheet(sheet_name)
+        worksheet = sh.worksheet("Weekly_Grid")
     except gspread.exceptions.WorksheetNotFound:
-        # Tạo sheet mới nếu chưa tồn tại cho tuần đó
-        ws = sh.add_worksheet(title=sheet_name, rows="100", cols="10")
-        ws.append_row(["Tên công việc", "Phân loại", "Mức ưu tiên", "Hạn chót", "Hoàn thành"])
-        return ws
+        worksheet = sh.add_worksheet(title="Weekly_Grid", rows="50", cols="15")
 
-def load_week_tasks(sheet_name):
-    try:
-        ws = get_worksheet(sheet_name)
-        data = ws.get_all_records()
-        if not data:
-            return pd.DataFrame(columns=["Tên công việc", "Phân loại", "Mức ưu tiên", "Hạn chót", "Hoàn thành"])
-        
-        df = pd.DataFrame(data)
-        if "Hoàn thành" in df.columns:
-            df["Hoàn thành"] = df["Hoàn thành"].apply(lambda x: True if str(x).lower() in ["true", "1", "x", "hoàn thành"] else False)
-        return df
-    except Exception:
-        return pd.DataFrame(columns=["Tên công việc", "Phân loại", "Mức ưu tiên", "Hạn chót", "Hoàn thành"])
-
-def save_week_tasks(sheet_name, df):
-    ws = get_worksheet(sheet_name)
-    ws.clear()
+    worksheet.clear()
     
     df_save = df.copy()
-    df_save["Hạn chót"] = df_save["Hạn chót"].astype(str)
+    
+    # Tính cột tổng hợp tỷ lệ hoàn thành cho từng dòng công việc
+    days_checked = df_save[DAYS].sum(axis=1)
+    # Nếu dòng đó có đánh dấu checkbox ngày nào thì tính %
+    df_save["% Hoàn thành"] = days_checked.apply(lambda x: f"{(x / 7 * 100):.1f}%" if x > 0 else "0.0%")
     
     data_to_write = [df_save.columns.tolist()] + df_save.values.tolist()
-    ws.update("A1", data_to_write)
+    worksheet.update("A1", data_to_write)
