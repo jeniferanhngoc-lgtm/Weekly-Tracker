@@ -1,14 +1,17 @@
 import json
 import re
-from openai import OpenAI
+from openai import OpenAI, NotFoundError
 
 def clean_and_parse_json(text: str) -> dict:
-    """Hàm bóc tách JSON chuẩn từ phản hồi của AI."""
-    # Tìm đoạn chứa JSON trong cặp dấu { ... }
-    match = re.search(r'\{.*\}', text, re.DOTALL)
+    """Trích xuất và parse chuỗi JSON từ phản hồi của AI."""
+    # Loại bỏ thẻ markdown codeblock nếu AI trả về dạng ```json ... ```
+    cleaned_text = re.sub(r'```json\s*', '', text)
+    cleaned_text = re.sub(r'```\s*', '', cleaned_text)
+    
+    match = re.search(r'\{.*\}', cleaned_text, re.DOTALL)
     if match:
         return json.loads(match.group(0))
-    return json.loads(text)
+    return json.loads(cleaned_text.strip())
 
 def analyze_user_notes(raw_text: str, api_key: str):
     client = OpenAI(
@@ -18,7 +21,7 @@ def analyze_user_notes(raw_text: str, api_key: str):
     
     system_instruction = """
     Phân tích đoạn ghi chú tự do thành danh sách các đầu mục công việc.
-    CHỈ trả về duy nhất 1 chuỗi JSON (không kèm lời giải thích, không dùng markdown codeblock) theo cấu trúc:
+    CHỈ trả về duy nhất 1 chuỗi JSON theo cấu trúc:
     {
       "tasks": [
         {
@@ -32,12 +35,13 @@ def analyze_user_notes(raw_text: str, api_key: str):
     }
     """
 
-    # Danh sách các model Free hoạt động ổn định nhất trên OpenRouter
+    # openrouter/auto sẽ tự chọn mô hình tốt nhất và đang hoạt động cho bạn
     candidate_models = [
+        "openrouter/auto",
         "meta-llama/llama-3.3-70b-instruct:free",
-        "google/gemini-2.0-flash-lite-preview-02-05:free",
+        "deepseek/deepseek-r1:free",
         "qwen/qwen-2.5-72b-instruct:free",
-        "deepseek/deepseek-r1:free"
+        "google/gemini-2.0-flash-exp:free"
     ]
 
     last_exception = None
@@ -51,8 +55,9 @@ def analyze_user_notes(raw_text: str, api_key: str):
                 ]
             )
             content = response.choices[0].message.content
-            return clean_and_parse_json(content)
-        except Exception as e:
+            if content:
+                return clean_and_parse_json(content)
+        except (NotFoundError, Exception) as e:
             last_exception = e
             continue
 
