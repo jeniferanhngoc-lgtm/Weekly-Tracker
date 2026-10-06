@@ -47,7 +47,7 @@ def load_weekly_sheet(year: int, week: int):
 
 def save_weekly_sheet(year: int, week: int, time_range_str: str, df_current: pd.DataFrame):
     """Lưu danh sách công việc của tuần vào Google Sheets."""
-    spreadsheet_id = st.secrets["spreadsheet_id"]
+    spreadsheet_id = st.secrets["14Sm3SZhaoV-MOwFuH0C2qNZYN_KB5wKFPpZNh8fq4Y8"]
     gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
     sh = gc.open_by_key(spreadsheet_id)
     
