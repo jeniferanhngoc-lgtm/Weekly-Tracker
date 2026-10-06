@@ -1,50 +1,35 @@
 import json
-import time
-import google.genai as genai
-from google.genai import types
-from google.genai.errors import ClientError, ServerError
+from openai import OpenAI
 
 def analyze_user_notes(raw_text: str, api_key: str):
-    client = genai.Client(api_key=api_key)
+    # Khởi tạo client kết nối OpenRouter
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key
+    )
+    
     system_instruction = """
     Phân tích đoạn ghi chú tự do thành danh sách các đầu mục công việc.
-    Cung cấp đầu ra dạng JSON gồm mảng các đối tượng có cấu trúc:
+    Trả về định dạng JSON thuần túy (JSON object) gồm mảng "tasks" chứa các đối tượng:
     - title: Tên công việc
     - category: Phân loại công việc
     - priority: Mức độ ưu tiên (P1/P2/P3)
     - deadline: Ngày hết hạn (định dạng YYYY-MM-DD)
-    - subtasks: Khung sườn hoặc các bước thực hiện
+    - subtasks: Danh sách các bước thực hiện nhỏ
     """
+
+    # Danh sách các model Free cực ngon trên OpenRouter
+    # 1. google/gemini-2.0-flash-lite-001:free
+    # 2. meta-llama/llama-3.3-70b-instruct:free
+    # 3. deepseek/deepseek-r1:free
     
-    # gemini-3.8-flash là mô hình chính thức được Google AI khuyến nghị
-    candidate_models = ['gemini-3.8-flash', 'gemini-2.0-flash']
+    response = client.chat.completions.create(
+        model="google/gemini-2.0-flash-lite-001:free",
+        messages=[
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": raw_text}
+        ],
+        response_format={"type": "json_object"}
+    )
     
-    last_exception = None
-    for model_name in candidate_models:
-        # Thử tối đa 3 lần cho mỗi model
-        for attempt in range(3):
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=raw_text,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json"
-                    )
-                )
-                return json.loads(response.text)
-            except ServerError as e:
-                # Nếu gặp lỗi quá tải server (503/500), chờ tăng dần (2s, 4s, 6s) rồi thử lại
-                last_exception = e
-                time.sleep(2 * (attempt + 1))
-                continue
-            except ClientError as e:
-                # Nếu gặp lỗi Client (404/400), bỏ qua model này và thử model tiếp theo ngay lập tức
-                last_exception = e
-                break
-            except Exception as e:
-                last_exception = e
-                time.sleep(1)
-                continue
-            
-    raise last_exception
+    return json.loads(response.choices[0].message.content)
