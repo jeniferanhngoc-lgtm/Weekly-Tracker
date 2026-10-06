@@ -13,8 +13,9 @@ def analyze_user_notes(raw_text: str, api_key: str):
     - deadline: Ngày hết hạn (định dạng YYYY-MM-DD)
     - subtasks: Khung sườn hoặc các bước thực hiện
     """
+    
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-3.8-flash',  # Cập nhật tên model mới
         contents=raw_text,
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
