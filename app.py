@@ -9,6 +9,8 @@ from sheets_db import (
     save_weekly_sheet,
 )
 
+from ai_scheduler import suggest_task_order
+
 
 # =========================================================
 # PAGE CONFIG
@@ -24,7 +26,7 @@ st.title("Quản Lý Công Việc Theo Tuần")
 
 
 # =========================================================
-# CURRENT WEEK
+# CURRENT DATE / WEEK
 # =========================================================
 
 today = datetime.date.today()
@@ -35,9 +37,9 @@ current_year, current_week, _ = today.isocalendar()
 # SELECT YEAR / WEEK
 # =========================================================
 
-col1, col2 = st.columns(2)
+col_select1, col_select2 = st.columns(2)
 
-with col1:
+with col_select1:
     selected_year = st.number_input(
         "Năm",
         min_value=2024,
@@ -46,7 +48,7 @@ with col1:
         step=1,
     )
 
-with col2:
+with col_select2:
     selected_week = st.number_input(
         "Tuần thứ",
         min_value=1,
@@ -61,7 +63,7 @@ selected_week = int(selected_week)
 
 
 # =========================================================
-# DATE RANGE
+# WEEK DATE RANGE
 # =========================================================
 
 try:
@@ -96,13 +98,34 @@ st.subheader(
 
 
 # =========================================================
-# SESSION STATE
+# SESSION STATE KEYS
 # =========================================================
 
-week_key = f"df_simple_{selected_year}_{selected_week}"
+week_key = (
+    f"df_simple_"
+    f"{selected_year}_"
+    f"{selected_week}"
+)
 
+ai_key = (
+    f"ai_task_order_"
+    f"{selected_year}_"
+    f"{selected_week}"
+)
+
+sort_key = (
+    f"sort_option_"
+    f"{selected_year}_"
+    f"{selected_week}"
+)
+
+
+# =========================================================
+# LOAD DATA
+# =========================================================
 
 if week_key not in st.session_state:
+
     st.session_state[week_key] = load_weekly_sheet(
         selected_year,
         selected_week,
@@ -116,7 +139,10 @@ if not isinstance(df, pd.DataFrame):
     df = pd.DataFrame(columns=COLUMNS)
 
 
-# Đảm bảo đủ cột
+# =========================================================
+# NORMALIZE COLUMNS
+# =========================================================
+
 for column in COLUMNS:
 
     if column not in df.columns:
@@ -135,21 +161,24 @@ df = df[COLUMNS].copy()
 
 
 # =========================================================
-# CHUẨN HÓA DEADLINE
+# NORMALIZE DEADLINE
 # =========================================================
 
-df["Deadline"] = pd.to_datetime(
-    df["Deadline"],
-    errors="coerce",
-    dayfirst=True,
-)
+if "Deadline" in df.columns:
+
+    df["Deadline"] = pd.to_datetime(
+        df["Deadline"],
+        errors="coerce",
+        dayfirst=True,
+    )
 
 
 # =========================================================
-# SORT PRIORITY
+# SORT OPTION
 # =========================================================
 
 st.markdown("#### Sắp xếp công việc")
+
 
 sort_option = st.selectbox(
     "Sắp xếp theo mức độ ưu tiên",
@@ -158,6 +187,7 @@ sort_option = st.selectbox(
         "Cao → Thấp",
         "Thấp → Cao",
     ],
+    key=sort_key,
 )
 
 
@@ -174,38 +204,47 @@ priority_low_to_high = {
 }
 
 
+display_df = df.copy()
+
+
 if sort_option == "Cao → Thấp":
 
-    df["_priority_order"] = (
-        df["Mức độ ưu tiên"]
+    display_df["_priority_order"] = (
+        display_df["Mức độ ưu tiên"]
         .map(priority_high_to_low)
         .fillna(99)
     )
 
-    df = (
-        df.sort_values(
+    display_df = (
+        display_df
+        .sort_values(
             "_priority_order",
             kind="stable",
         )
-        .drop(columns=["_priority_order"])
+        .drop(
+            columns=["_priority_order"]
+        )
         .reset_index(drop=True)
     )
 
 
 elif sort_option == "Thấp → Cao":
 
-    df["_priority_order"] = (
-        df["Mức độ ưu tiên"]
+    display_df["_priority_order"] = (
+        display_df["Mức độ ưu tiên"]
         .map(priority_low_to_high)
         .fillna(99)
     )
 
-    df = (
-        df.sort_values(
+    display_df = (
+        display_df
+        .sort_values(
             "_priority_order",
             kind="stable",
         )
-        .drop(columns=["_priority_order"])
+        .drop(
+            columns=["_priority_order"]
+        )
         .reset_index(drop=True)
     )
 
@@ -229,10 +268,7 @@ if not df.empty:
 
 else:
 
-    valid_mask = pd.Series(
-        dtype=bool
-    )
-
+    valid_mask = pd.Series(dtype=bool)
     total_tasks = 0
 
 
@@ -298,6 +334,316 @@ st.divider()
 
 
 # =========================================================
+# AI SECTION
+# =========================================================
+
+st.subheader(
+    "AI hỗ trợ sắp xếp công việc"
+)
+
+st.caption(
+    "AI chỉ đề xuất thứ tự thực hiện trong tuần. "
+    "Không tự thay đổi deadline, mức độ ưu tiên, ghi chú hoặc trạng thái."
+)
+
+
+tasks_for_ai = df[
+    df["Tên công việc"]
+    .astype(str)
+    .str.strip()
+    != ""
+].copy()
+
+
+if st.button(
+    "🤖 AI gợi ý thứ tự công việc",
+    key=f"btn_ai_{selected_year}_{selected_week}",
+):
+
+    if tasks_for_ai.empty:
+
+        st.warning(
+            "Chưa có công việc để AI phân tích."
+        )
+
+    else:
+
+        with st.spinner(
+            "AI đang phân tích mức độ ưu tiên, deadline và ghi chú..."
+        ):
+
+            try:
+
+                ai_result = suggest_task_order(
+                    tasks_for_ai
+                )
+
+
+                if not ai_result:
+
+                    st.warning(
+                        "AI chưa trả về gợi ý nào."
+                    )
+
+                else:
+
+                    st.session_state[
+                        ai_key
+                    ] = ai_result
+
+
+            except Exception as e:
+
+                st.error(
+                    "Không thể lấy gợi ý từ AI."
+                )
+
+                st.code(
+                    f"{type(e).__name__}: {e}"
+                )
+
+
+# =========================================================
+# AI PREVIEW
+# =========================================================
+
+if ai_key in st.session_state:
+
+    ai_result = st.session_state[
+        ai_key
+    ]
+
+
+    st.markdown(
+        "#### Thứ tự AI đề xuất"
+    )
+
+
+    preview_rows = []
+
+
+    for position, item in enumerate(
+        ai_result,
+        start=1,
+    ):
+
+        task_id = item.get(
+            "id"
+        )
+
+
+        if task_id not in df.index:
+            continue
+
+
+        row = df.loc[
+            task_id
+        ]
+
+
+        deadline_value = row.get(
+            "Deadline",
+            pd.NaT,
+        )
+
+
+        if pd.notna(
+            deadline_value
+        ):
+
+            deadline_value = pd.to_datetime(
+                deadline_value,
+                errors="coerce",
+            )
+
+
+            if pd.notna(
+                deadline_value
+            ):
+
+                deadline_display = (
+                    deadline_value.strftime(
+                        "%d/%m/%Y %H:%M"
+                    )
+                )
+
+            else:
+
+                deadline_display = ""
+
+        else:
+
+            deadline_display = ""
+
+
+        preview_rows.append(
+            {
+                "Thứ tự": position,
+
+                "Công việc":
+                    row.get(
+                        "Tên công việc",
+                        "",
+                    ),
+
+                "Ưu tiên":
+                    row.get(
+                        "Mức độ ưu tiên",
+                        "",
+                    ),
+
+                "Deadline":
+                    deadline_display,
+
+                "Ghi chú":
+                    row.get(
+                        "Ghi chú",
+                        "",
+                    ),
+
+                "Lý do AI":
+                    item.get(
+                        "reason",
+                        "",
+                    ),
+            }
+        )
+
+
+    preview_df = pd.DataFrame(
+        preview_rows
+    )
+
+
+    if not preview_df.empty:
+
+        st.dataframe(
+            preview_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
+    col_accept, col_cancel = st.columns(2)
+
+
+    # =====================================================
+    # ACCEPT AI ORDER
+    # =====================================================
+
+    with col_accept:
+
+        if st.button(
+            "✅ Chấp nhận thứ tự AI",
+            type="primary",
+            key=f"accept_ai_{selected_year}_{selected_week}",
+        ):
+
+            ordered_ids = []
+
+
+            for item in ai_result:
+
+                task_id = item.get(
+                    "id"
+                )
+
+
+                if (
+                    task_id
+                    in df.index
+                    and task_id
+                    not in ordered_ids
+                ):
+
+                    ordered_ids.append(
+                        task_id
+                    )
+
+
+            # Giữ các task còn lại nếu AI không trả đủ
+            remaining_ids = [
+                idx
+                for idx in df.index
+                if idx not in ordered_ids
+            ]
+
+
+            new_order = (
+                ordered_ids
+                + remaining_ids
+            )
+
+
+            sorted_df = (
+                df.loc[
+                    new_order
+                ]
+                .reset_index(
+                    drop=True
+                )
+            )
+
+
+            st.session_state[
+                week_key
+            ] = sorted_df
+
+
+            del st.session_state[
+                ai_key
+            ]
+
+
+            # Đưa sort thủ công về mặc định
+            st.session_state[
+                sort_key
+            ] = "Mặc định"
+
+
+            # Xóa state editor để bảng nhận thứ tự mới
+            editor_key = (
+                f"editor_simple_"
+                f"{selected_year}_"
+                f"{selected_week}"
+            )
+
+
+            if (
+                editor_key
+                in st.session_state
+            ):
+
+                del st.session_state[
+                    editor_key
+                ]
+
+
+            st.rerun()
+
+
+    # =====================================================
+    # CANCEL AI
+    # =====================================================
+
+    with col_cancel:
+
+        if st.button(
+            "❌ Bỏ gợi ý AI",
+            key=f"cancel_ai_{selected_year}_{selected_week}",
+        ):
+
+            del st.session_state[
+                ai_key
+            ]
+
+            st.rerun()
+
+
+st.divider()
+
+
+# =========================================================
 # TABLE CONFIG
 # =========================================================
 
@@ -349,12 +695,19 @@ column_config = {
 # DATA EDITOR
 # =========================================================
 
+editor_key = (
+    f"editor_simple_"
+    f"{selected_year}_"
+    f"{selected_week}"
+)
+
+
 edited_df = st.data_editor(
-    df,
+    display_df,
     num_rows="dynamic",
     use_container_width=True,
     column_config=column_config,
-    key=f"editor_simple_{selected_year}_{selected_week}_{sort_option}",
+    key=editor_key,
 )
 
 
@@ -363,8 +716,9 @@ edited_df = st.data_editor(
 # =========================================================
 
 if st.button(
-    "Lưu & Đồng bộ Google Sheets",
+    "💾 Lưu & Đồng bộ Google Sheets",
     type="primary",
+    key=f"save_{selected_year}_{selected_week}",
 ):
 
     clean_df = edited_df.copy()
@@ -394,9 +748,20 @@ if st.button(
                 clean_df[column] = ""
 
 
-    clean_df = clean_df[COLUMNS]
+    clean_df = clean_df[
+        COLUMNS
+    ].copy()
 
 
+    # Chuẩn hóa deadline
+    clean_df["Deadline"] = pd.to_datetime(
+        clean_df["Deadline"],
+        errors="coerce",
+        dayfirst=True,
+    )
+
+
+    # Chuẩn hóa trạng thái
     clean_df["Trạng thái"] = (
         clean_df["Trạng thái"]
         .fillna(False)
@@ -420,7 +785,18 @@ if st.button(
 
         st.session_state[
             week_key
-        ] = clean_df
+        ] = clean_df.reset_index(
+            drop=True
+        )
+
+
+        # Nếu còn preview AI cũ thì xóa
+        if ai_key in st.session_state:
+
+            del st.session_state[
+                ai_key
+            ]
+
 
         st.success(
             f"Đã lưu tiến độ Tuần "
@@ -428,6 +804,7 @@ if st.button(
             f"({time_range_str}) "
             f"vào Google Sheets thành công!"
         )
+
 
         st.rerun()
 
@@ -457,12 +834,8 @@ else:
 
 if not report_df.empty:
 
-    report_df[
-        "Trạng thái"
-    ] = (
-        report_df[
-            "Trạng thái"
-        ]
+    report_df["Trạng thái"] = (
+        report_df["Trạng thái"]
         .fillna(False)
         .astype(bool)
     )
@@ -521,28 +894,39 @@ if not report_df.empty:
 
             deadline_str = ""
 
+
             if pd.notna(
                 deadline_value
             ):
 
                 deadline_value = pd.to_datetime(
-                    deadline_value
+                    deadline_value,
+                    errors="coerce",
                 )
 
-                deadline_str = (
-                    " | Deadline: "
-                    + deadline_value.strftime(
-                        "%d/%m/%Y %H:%M"
+
+                if pd.notna(
+                    deadline_value
+                ):
+
+                    deadline_str = (
+                        " | Deadline: "
+                        + deadline_value.strftime(
+                            "%d/%m/%Y %H:%M"
+                        )
                     )
-                )
 
 
             note_str = ""
 
+
             if (
                 note
                 and note.lower()
-                != "nan"
+                not in [
+                    "nan",
+                    "none",
+                ]
             ):
 
                 note_str = (
@@ -564,3 +948,14 @@ if not report_df.empty:
         st.info(
             "Tất cả công việc trong tuần đã hoàn thành!"
         )
+
+
+# =========================================================
+# EMPTY STATE
+# =========================================================
+
+elif total_tasks == 0:
+
+    st.info(
+        "Chưa có công việc nào trong tuần này."
+    )
