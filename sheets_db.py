@@ -1,10 +1,13 @@
+import datetime
+import uuid
+
 import gspread
 import pandas as pd
 import streamlit as st
 
 
 # =========================================================
-# CONFIG
+# COLUMNS HIỂN THỊ
 # =========================================================
 
 COLUMNS = [
@@ -16,11 +19,31 @@ COLUMNS = [
 ]
 
 
-SHEET_HEADERS = [
-    "Năm",
-    "Tuần",
+# =========================================================
+# COLUMNS HỆ THỐNG
+# =========================================================
+
+SYSTEM_COLUMNS = [
+    "Task ID",
+    "Năm gốc",
+    "Tuần gốc",
     "Mốc thời gian",
-] + COLUMNS
+    "Ngày hoàn thành",
+]
+
+
+SHEET_HEADERS = [
+    "Task ID",
+    "Năm gốc",
+    "Tuần gốc",
+    "Mốc thời gian",
+    "Tên công việc",
+    "Mức độ ưu tiên",
+    "Deadline",
+    "Ghi chú",
+    "Trạng thái",
+    "Ngày hoàn thành",
+]
 
 
 WORKSHEET_NAME = "Simple_Weekly_Tasks"
@@ -33,9 +56,7 @@ WORKSHEET_NAME = "Simple_Weekly_Tasks"
 def get_google_client():
 
     service_account_info = dict(
-        st.secrets[
-            "gcp_service_account"
-        ]
+        st.secrets["gcp_service_account"]
     )
 
     return gspread.service_account_from_dict(
@@ -43,123 +64,61 @@ def get_google_client():
     )
 
 
-# =========================================================
-# SPREADSHEET
-# =========================================================
-
 def get_spreadsheet():
 
     spreadsheet_id = str(
-        st.secrets[
-            "spreadsheet_id"
-        ]
+        st.secrets["spreadsheet_id"]
     ).strip()
-
-
-    service_account_info = dict(
-        st.secrets[
-            "gcp_service_account"
-        ]
-    )
-
 
     gc = get_google_client()
 
+    gc.http_client.fetch_sheet_metadata(
+        spreadsheet_id
+    )
 
-    try:
-
-        gc.http_client.fetch_sheet_metadata(
-            spreadsheet_id
-        )
-
-
-        return gc.open_by_key(
-            spreadsheet_id
-        )
-
-
-    except gspread.exceptions.APIError as e:
-
-        st.error(
-            "Google Sheets API từ chối kết nối."
-        )
-
-
-        st.code(
-            f"""Service account:
-{service_account_info.get("client_email")}
-
-Project ID:
-{service_account_info.get("project_id")}
-
-Spreadsheet ID:
-{spreadsheet_id}
-
-Lỗi Google API:
-{repr(e)}
-"""
-        )
-
-        raise
+    return gc.open_by_key(
+        spreadsheet_id
+    )
 
 
 # =========================================================
 # WORKSHEET
 # =========================================================
 
-def get_or_create_worksheet(
-    spreadsheet,
-):
+def get_or_create_worksheet(spreadsheet):
 
     try:
-
-        worksheet = (
-            spreadsheet.worksheet(
-                WORKSHEET_NAME
-            )
+        return spreadsheet.worksheet(
+            WORKSHEET_NAME
         )
-
 
     except gspread.exceptions.WorksheetNotFound:
 
-        worksheet = (
-            spreadsheet.add_worksheet(
-                title=WORKSHEET_NAME,
-                rows=500,
-                cols=12,
-            )
+        worksheet = spreadsheet.add_worksheet(
+            title=WORKSHEET_NAME,
+            rows=1000,
+            cols=15,
         )
-
 
         worksheet.append_row(
             SHEET_HEADERS
         )
 
-
-    return worksheet
+        return worksheet
 
 
 # =========================================================
-# STATUS
+# HELPERS
 # =========================================================
 
 def parse_status(value):
 
-    if isinstance(
-        value,
-        bool,
-    ):
+    if isinstance(value, bool):
         return value
 
+    value = str(value).strip().lower()
 
-    normalized = (
-        str(value)
-        .strip()
-        .lower()
-    )
-
-
-    return normalized in [
+    return value in [
         "true",
         "1",
         "x",
@@ -170,36 +129,19 @@ def parse_status(value):
     ]
 
 
-# =========================================================
-# DEADLINE
-# =========================================================
-
-def parse_deadline(value):
-    """
-    Chuyển deadline từ Google Sheets
-    về pandas datetime.
-    """
+def parse_datetime(value):
 
     if value is None:
         return pd.NaT
 
-
-    text = str(
-        value
-    ).strip()
-
+    text = str(value).strip()
 
     if (
         text == ""
         or text.lower()
-        in [
-            "nan",
-            "nat",
-            "none",
-        ]
+        in ["nan", "nat", "none"]
     ):
         return pd.NaT
-
 
     return pd.to_datetime(
         text,
@@ -208,86 +150,202 @@ def parse_deadline(value):
     )
 
 
+def week_start(year, week):
+
+    return pd.Timestamp(
+        datetime.date.fromisocalendar(
+            int(year),
+            int(week),
+            1,
+        )
+    )
+
+
+def week_end(year, week):
+
+    # 23:59:59 ngày Chủ nhật
+    return (
+        pd.Timestamp(
+            datetime.date.fromisocalendar(
+                int(year),
+                int(week),
+                7,
+            )
+        )
+        + pd.Timedelta(days=1)
+        - pd.Timedelta(seconds=1)
+    )
+
+
+def make_task_id():
+
+    return uuid.uuid4().hex
+
+
 # =========================================================
-# NORMALIZE DATAFRAME
+# MIGRATION / NORMALIZATION
 # =========================================================
 
-def normalize_dataframe(df):
+def normalize_database(df):
 
-    if df is None:
+    """
+    Chuyển cả dữ liệu sheet cũ và mới
+    về cùng một cấu trúc.
+    """
+
+    if df is None or df.empty:
 
         return pd.DataFrame(
-            columns=COLUMNS
+            columns=SHEET_HEADERS
         )
 
 
     df = df.copy()
 
 
-    # Hỗ trợ dữ liệu cũ
+    # -----------------------------------------------------
+    # MIGRATE VERSION CŨ:
+    # Năm -> Năm gốc
+    # Tuần -> Tuần gốc
+    # -----------------------------------------------------
+
     if (
-        "Trạng thái"
-        not in df.columns
-        and
-        "Đã xong"
-        in df.columns
+        "Năm gốc" not in df.columns
+        and "Năm" in df.columns
     ):
 
-        df[
-            "Trạng thái"
-        ] = df[
+        df["Năm gốc"] = df["Năm"]
+
+
+    if (
+        "Tuần gốc" not in df.columns
+        and "Tuần" in df.columns
+    ):
+
+        df["Tuần gốc"] = df["Tuần"]
+
+
+    # -----------------------------------------------------
+    # OLD STATUS
+    # -----------------------------------------------------
+
+    if (
+        "Trạng thái" not in df.columns
+        and "Đã xong" in df.columns
+    ):
+
+        df["Trạng thái"] = df[
             "Đã xong"
         ]
 
 
-    for column in COLUMNS:
+    # -----------------------------------------------------
+    # ENSURE ALL COLUMNS
+    # -----------------------------------------------------
+
+    for column in SHEET_HEADERS:
 
         if column not in df.columns:
 
             if column == "Trạng thái":
-
                 df[column] = False
 
-            elif column == "Deadline":
-
-                df[column] = pd.NaT
-
             else:
-
                 df[column] = ""
 
 
-    df[
-        "Trạng thái"
-    ] = (
-        df[
-            "Trạng thái"
-        ]
-        .apply(
-            parse_status
-        )
+    # -----------------------------------------------------
+    # TASK ID
+    # -----------------------------------------------------
+
+    for index in df.index:
+
+        task_id = str(
+            df.at[index, "Task ID"]
+        ).strip()
+
+        if (
+            not task_id
+            or task_id.lower()
+            in ["nan", "none"]
+        ):
+
+            df.at[
+                index,
+                "Task ID"
+            ] = make_task_id()
+
+
+    # -----------------------------------------------------
+    # TYPES
+    # -----------------------------------------------------
+
+    df["Năm gốc"] = pd.to_numeric(
+        df["Năm gốc"],
+        errors="coerce",
     )
 
+    df["Tuần gốc"] = pd.to_numeric(
+        df["Tuần gốc"],
+        errors="coerce",
+    )
 
-    df[
+    df["Deadline"] = df[
         "Deadline"
-    ] = (
-        df[
-            "Deadline"
-        ]
-        .apply(
-            parse_deadline
-        )
+    ].apply(
+        parse_datetime
+    )
+
+    df["Ngày hoàn thành"] = df[
+        "Ngày hoàn thành"
+    ].apply(
+        parse_datetime
+    )
+
+    df["Trạng thái"] = df[
+        "Trạng thái"
+    ].apply(
+        parse_status
     )
 
 
     return df[
-        COLUMNS
-    ]
+        SHEET_HEADERS
+    ].copy()
 
 
 # =========================================================
-# LOAD WEEK
+# READ DATABASE
+# =========================================================
+
+def read_database():
+
+    spreadsheet = get_spreadsheet()
+
+    worksheet = get_or_create_worksheet(
+        spreadsheet
+    )
+
+    data = worksheet.get_all_records()
+
+    if not data:
+
+        return (
+            pd.DataFrame(
+                columns=SHEET_HEADERS
+            ),
+            worksheet,
+        )
+
+    df = pd.DataFrame(data)
+
+    df = normalize_database(df)
+
+    return df, worksheet
+
+
+# =========================================================
+# LOAD WEEK VIEW
 # =========================================================
 
 def load_weekly_sheet(
@@ -295,104 +353,215 @@ def load_weekly_sheet(
     week: int,
 ):
 
+    """
+    Trả về:
+    - task sinh ra trong tuần đang xem
+    - task tồn từ các tuần trước mà tại đầu tuần
+      đang xem vẫn chưa hoàn thành
+    """
+
     try:
 
-        spreadsheet = (
-            get_spreadsheet()
-        )
+        df_all, _ = read_database()
 
 
-        worksheet = (
-            get_or_create_worksheet(
-                spreadsheet
-            )
-        )
+        if df_all.empty:
 
-
-        data = (
-            worksheet.get_all_records()
-        )
-
-
-        if not data:
-
-            return pd.DataFrame(
-                columns=COLUMNS
-            )
-
-
-        df_all = pd.DataFrame(
-            data
-        )
-
-
-        if "Năm" not in df_all.columns:
-
-            st.error(
-                'Google Sheet thiếu cột "Năm".'
+            empty_columns = (
+                SYSTEM_COLUMNS
+                + COLUMNS
+                + ["Nguồn"]
             )
 
             return pd.DataFrame(
-                columns=COLUMNS
+                columns=empty_columns
             )
 
 
-        if "Tuần" not in df_all.columns:
+        selected_start = week_start(
+            year,
+            week,
+        )
 
-            st.error(
-                'Google Sheet thiếu cột "Tuần".'
-            )
-
-            return pd.DataFrame(
-                columns=COLUMNS
-            )
-
-
-        df_all["Năm"] = (
-            pd.to_numeric(
-                df_all["Năm"],
-                errors="coerce",
-            )
+        selected_end = week_end(
+            year,
+            week,
         )
 
 
-        df_all["Tuần"] = (
-            pd.to_numeric(
-                df_all["Tuần"],
-                errors="coerce",
-            )
-        )
+        # =================================================
+        # TASK GỐC CỦA TUẦN ĐANG XEM
+        # =================================================
 
-
-        df_filtered = df_all[
-            (
-                df_all["Năm"]
-                == year
-            )
+        current_week_mask = (
+            (df_all["Năm gốc"] == year)
             &
+            (df_all["Tuần gốc"] == week)
+        )
+
+
+        # =================================================
+        # TASK CŨ
+        # =================================================
+
+        origin_dates = []
+
+
+        for _, row in df_all.iterrows():
+
+            try:
+
+                origin_dates.append(
+                    week_start(
+                        int(row["Năm gốc"]),
+                        int(row["Tuần gốc"]),
+                    )
+                )
+
+            except Exception:
+
+                origin_dates.append(
+                    pd.NaT
+                )
+
+
+        df_all["_origin_start"] = (
+            origin_dates
+        )
+
+
+        old_task = (
+            df_all["_origin_start"]
+            < selected_start
+        )
+
+
+        completion = (
+            df_all["Ngày hoàn thành"]
+        )
+
+
+        # Task được xem là tồn trong tuần này nếu:
+        # - chưa bao giờ hoàn thành
+        # hoặc
+        # - hoàn thành từ đầu tuần này trở đi
+        carryover_alive = (
+            completion.isna()
+            |
             (
-                df_all["Tuần"]
-                == week
+                completion
+                >= selected_start
             )
+        )
+
+
+        carryover_mask = (
+            old_task
+            &
+            carryover_alive
+        )
+
+
+        view_df = df_all[
+            current_week_mask
+            |
+            carryover_mask
         ].copy()
 
 
-        if df_filtered.empty:
+        if view_df.empty:
+
+            empty_columns = (
+                SYSTEM_COLUMNS
+                + COLUMNS
+                + ["Nguồn"]
+            )
 
             return pd.DataFrame(
-                columns=COLUMNS
+                columns=empty_columns
             )
 
 
-        return normalize_dataframe(
-            df_filtered
+        # =================================================
+        # TRẠNG THÁI THEO THỜI ĐIỂM TUẦN ĐANG XEM
+        # =================================================
+
+        # Nếu task hoàn thành sau tuần đang xem,
+        # khi xem lại tuần cũ nó phải hiện là chưa hoàn thành.
+        view_df["Trạng thái"] = (
+            view_df["Ngày hoàn thành"]
+            .notna()
+            &
+            (
+                view_df["Ngày hoàn thành"]
+                <= selected_end
+            )
         )
 
 
-    except gspread.exceptions.APIError:
+        # =================================================
+        # NGUỒN
+        # =================================================
 
-        return pd.DataFrame(
-            columns=COLUMNS
+        def source_label(row):
+
+            if (
+                int(row["Năm gốc"]) == year
+                and
+                int(row["Tuần gốc"]) == week
+            ):
+
+                return "Tuần này"
+
+
+            label = (
+                f"Tồn từ tuần "
+                f"{int(row['Tuần gốc'])}"
+                f"/{int(row['Năm gốc'])}"
+            )
+
+
+            if (
+                pd.notna(
+                    row["Ngày hoàn thành"]
+                )
+                and
+                selected_start
+                <= row["Ngày hoàn thành"]
+                <= selected_end
+            ):
+
+                label += " • hoàn thành trễ"
+
+
+            return label
+
+
+        view_df["Nguồn"] = (
+            view_df.apply(
+                source_label,
+                axis=1,
+            )
+        )
+
+
+        view_df = view_df.drop(
+            columns=["_origin_start"],
+            errors="ignore",
+        )
+
+
+        output_columns = (
+            SYSTEM_COLUMNS
+            + COLUMNS
+            + ["Nguồn"]
+        )
+
+
+        return view_df[
+            output_columns
+        ].reset_index(
+            drop=True
         )
 
 
@@ -408,12 +577,16 @@ def load_weekly_sheet(
         )
 
         return pd.DataFrame(
-            columns=COLUMNS
+            columns=(
+                SYSTEM_COLUMNS
+                + COLUMNS
+                + ["Nguồn"]
+            )
         )
 
 
 # =========================================================
-# SAVE WEEK
+# SAVE DATABASE
 # =========================================================
 
 def save_weekly_sheet(
@@ -423,259 +596,411 @@ def save_weekly_sheet(
     df_current: pd.DataFrame,
 ):
 
+    """
+    Đồng bộ view tuần hiện tại vào database chính.
+
+    - Task mới -> tạo Task ID + tuần gốc hiện tại
+    - Tick hoàn thành -> ghi Ngày hoàn thành
+    - Task tồn -> giữ tuần gốc cũ
+    - Bỏ tick task vừa hoàn thành -> xóa ngày hoàn thành
+    - Xóa task thuộc chính tuần này -> xóa khỏi database
+    - Không xóa task tồn chỉ vì nó biến mất khỏi view
+    """
+
     try:
 
-        spreadsheet = (
-            get_spreadsheet()
+        df_all, worksheet = read_database()
+
+        df_edit = df_current.copy()
+
+
+        # =================================================
+        # ENSURE COLUMNS
+        # =================================================
+
+        required_view_columns = (
+            SYSTEM_COLUMNS
+            + COLUMNS
+            + ["Nguồn"]
         )
 
 
-        worksheet = (
-            get_or_create_worksheet(
-                spreadsheet
+        for column in required_view_columns:
+
+            if column not in df_edit.columns:
+
+                if column == "Trạng thái":
+                    df_edit[column] = False
+
+                elif column == "Deadline":
+                    df_edit[column] = pd.NaT
+
+                else:
+                    df_edit[column] = ""
+
+
+        # Chỉ giữ dòng có công việc
+        df_edit = df_edit[
+            df_edit["Tên công việc"]
+            .astype(str)
+            .str.strip()
+            != ""
+        ].copy()
+
+
+        now = pd.Timestamp.now()
+
+
+        # =================================================
+        # PROCESS ROWS
+        # =================================================
+
+        saved_rows = []
+
+        visible_task_ids = set()
+
+
+        for _, row in df_edit.iterrows():
+
+            task_id = str(
+                row.get(
+                    "Task ID",
+                    "",
+                )
+            ).strip()
+
+
+            is_new = (
+                not task_id
+                or task_id.lower()
+                in ["nan", "none"]
             )
-        )
 
 
-        data = (
-            worksheet.get_all_records()
+            if is_new:
+
+                task_id = make_task_id()
+
+                origin_year = year
+                origin_week = week
+
+                original_completion = pd.NaT
+
+            else:
+
+                origin_year = row.get(
+                    "Năm gốc",
+                    year,
+                )
+
+                origin_week = row.get(
+                    "Tuần gốc",
+                    week,
+                )
+
+                original_completion = parse_datetime(
+                    row.get(
+                        "Ngày hoàn thành"
+                    )
+                )
+
+
+            # -------------------------------------------------
+            # FALLBACK ORIGIN
+            # -------------------------------------------------
+
+            try:
+                origin_year = int(
+                    origin_year
+                )
+
+            except Exception:
+                origin_year = year
+
+
+            try:
+                origin_week = int(
+                    origin_week
+                )
+
+            except Exception:
+                origin_week = week
+
+
+            # -------------------------------------------------
+            # STATUS / COMPLETION DATE
+            # -------------------------------------------------
+
+            current_status = bool(
+                row.get(
+                    "Trạng thái",
+                    False,
+                )
+            )
+
+
+            selected_end = week_end(
+                year,
+                week,
+            )
+
+
+            selected_start = week_start(
+                year,
+                week,
+            )
+
+
+            completion_date = (
+                original_completion
+            )
+
+
+            if current_status:
+
+                # Nếu chưa từng có ngày hoàn thành,
+                # ghi nhận thời điểm hiện tại.
+                if pd.isna(
+                    completion_date
+                ):
+
+                    completion_date = now
+
+
+            else:
+
+                # Nếu completion ở sau tuần đang xem,
+                # đó là dữ liệu lịch sử tương lai:
+                # không xóa.
+                if (
+                    pd.notna(
+                        completion_date
+                    )
+                    and
+                    completion_date
+                    > selected_end
+                ):
+
+                    pass
+
+                else:
+
+                    # Cho phép bỏ tick ở tuần hiện tại/
+                    # tuần chứa completion.
+                    completion_date = pd.NaT
+
+
+            saved_rows.append(
+                {
+                    "Task ID": task_id,
+
+                    "Năm gốc":
+                        origin_year,
+
+                    "Tuần gốc":
+                        origin_week,
+
+                    "Mốc thời gian":
+                        row.get(
+                            "Mốc thời gian",
+                            time_range_str,
+                        )
+                        or time_range_str,
+
+                    "Tên công việc":
+                        str(
+                            row.get(
+                                "Tên công việc",
+                                "",
+                            )
+                        ),
+
+                    "Mức độ ưu tiên":
+                        str(
+                            row.get(
+                                "Mức độ ưu tiên",
+                                "Trung bình",
+                            )
+                        ),
+
+                    "Deadline":
+                        parse_datetime(
+                            row.get(
+                                "Deadline"
+                            )
+                        ),
+
+                    "Ghi chú":
+                        str(
+                            row.get(
+                                "Ghi chú",
+                                "",
+                            )
+                        ),
+
+                    "Trạng thái":
+                        pd.notna(
+                            completion_date
+                        ),
+
+                    "Ngày hoàn thành":
+                        completion_date,
+                }
+            )
+
+
+            visible_task_ids.add(
+                task_id
+            )
+
+
+        df_saved = pd.DataFrame(
+            saved_rows,
+            columns=SHEET_HEADERS,
         )
 
 
         # =================================================
-        # OLD DATA
+        # DELETE TASKS REMOVED FROM CURRENT WEEK
         # =================================================
 
-        if data:
+        if not df_all.empty:
 
-            df_all = pd.DataFrame(
-                data
-            )
-
-
-            if "Năm" in df_all.columns:
-
-                df_all[
-                    "Năm"
-                ] = pd.to_numeric(
-                    df_all["Năm"],
-                    errors="coerce",
-                )
-
-            else:
-
-                df_all[
-                    "Năm"
-                ] = ""
-
-
-            if "Tuần" in df_all.columns:
-
-                df_all[
-                    "Tuần"
-                ] = pd.to_numeric(
-                    df_all["Tuần"],
-                    errors="coerce",
-                )
-
-            else:
-
-                df_all[
-                    "Tuần"
-                ] = ""
-
-
-            df_other = df_all[
-                ~(
-                    (
-                        df_all["Năm"]
-                        == year
-                    )
-                    &
-                    (
-                        df_all["Tuần"]
-                        == week
-                    )
-                )
-            ].copy()
-
-
-            # Đảm bảo dữ liệu cũ có Ghi chú
-            for column in SHEET_HEADERS:
-
-                if column not in df_other.columns:
-
-                    if column == "Trạng thái":
-
-                        df_other[
-                            column
-                        ] = False
-
-                    else:
-
-                        df_other[
-                            column
-                        ] = ""
-
-
-            df_other = df_other[
-                SHEET_HEADERS
+            current_week_existing = df_all[
+                (df_all["Năm gốc"] == year)
+                &
+                (df_all["Tuần gốc"] == week)
             ]
 
 
-        else:
+            deleted_ids = set(
+                current_week_existing[
+                    "Task ID"
+                ].astype(str)
+            ) - visible_task_ids
 
-            df_other = pd.DataFrame(
-                columns=SHEET_HEADERS
+
+            if deleted_ids:
+
+                df_all = df_all[
+                    ~df_all[
+                        "Task ID"
+                    ].astype(str).isin(
+                        deleted_ids
+                    )
+                ].copy()
+
+
+        # =================================================
+        # UPSERT
+        # =================================================
+
+        if not df_saved.empty:
+
+            saved_ids = set(
+                df_saved[
+                    "Task ID"
+                ].astype(str)
             )
 
 
-        # =================================================
-        # CURRENT WEEK
-        # =================================================
+            if not df_all.empty:
 
-        df_save = normalize_dataframe(
-            df_current
+                df_all = df_all[
+                    ~df_all[
+                        "Task ID"
+                    ].astype(str).isin(
+                        saved_ids
+                    )
+                ].copy()
+
+
+            df_all = pd.concat(
+                [
+                    df_all,
+                    df_saved,
+                ],
+                ignore_index=True,
+            )
+
+
+        df_all = normalize_database(
+            df_all
         )
 
 
-        # Chuyển deadline thành text
-        # để lưu Google Sheets ổn định
-        df_save[
+        # =================================================
+        # SERIALIZE FOR GOOGLE SHEETS
+        # =================================================
+
+        output_df = df_all.copy()
+
+
+        output_df[
             "Deadline"
-        ] = (
-            df_save[
-                "Deadline"
-            ]
-            .apply(
-                lambda x:
+        ] = output_df[
+            "Deadline"
+        ].apply(
+            lambda x:
                 x.strftime(
                     "%d/%m/%Y %H:%M"
                 )
                 if pd.notna(x)
                 else ""
-            )
         )
 
 
-        df_save.insert(
-            0,
-            "Năm",
-            int(year),
+        output_df[
+            "Ngày hoàn thành"
+        ] = output_df[
+            "Ngày hoàn thành"
+        ].apply(
+            lambda x:
+                x.strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+                if pd.notna(x)
+                else ""
         )
 
 
-        df_save.insert(
-            1,
-            "Tuần",
-            int(week),
+        output_df = output_df.fillna(
+            ""
         )
 
-
-        df_save.insert(
-            2,
-            "Mốc thời gian",
-            str(
-                time_range_str
-            ),
-        )
-
-
-        # =================================================
-        # MERGE
-        # =================================================
-
-        df_final = pd.concat(
-            [
-                df_other,
-                df_save,
-            ],
-            ignore_index=True,
-        )
-
-
-        df_final = df_final[
-            SHEET_HEADERS
-        ]
-
-
-        df_final = (
-            df_final.fillna("")
-        )
-
-
-        # =================================================
-        # CLEAN PYTHON TYPES
-        # =================================================
 
         rows = []
 
 
-        for row in df_final.itertuples(
+        for row in output_df[
+            SHEET_HEADERS
+        ].itertuples(
             index=False,
             name=None,
         ):
 
             clean_row = []
 
-
             for value in row:
 
-                if isinstance(
-                    value,
-                    bool,
-                ):
-
-                    clean_row.append(
-                        bool(value)
-                    )
-
-
-                elif isinstance(
-                    value,
-                    pd.Timestamp,
-                ):
-
-                    clean_row.append(
-                        value.strftime(
-                            "%d/%m/%Y %H:%M"
-                        )
-                    )
-
-
-                elif hasattr(
+                if hasattr(
                     value,
                     "item",
                 ):
 
                     try:
-
-                        clean_row.append(
-                            value.item()
-                        )
-
+                        value = value.item()
                     except Exception:
+                        pass
 
-                        clean_row.append(
-                            str(value)
-                        )
-
-
-                else:
-
-                    clean_row.append(
-                        value
-                    )
-
+                clean_row.append(
+                    value
+                )
 
             rows.append(
                 clean_row
             )
 
-
-        # =================================================
-        # WRITE
-        # =================================================
 
         worksheet.clear()
 
@@ -689,19 +1014,6 @@ def save_weekly_sheet(
 
 
         return True
-
-
-    except gspread.exceptions.APIError as e:
-
-        st.error(
-            "Google Sheets API trả về lỗi."
-        )
-
-        st.code(
-            repr(e)
-        )
-
-        return False
 
 
     except Exception as e:
