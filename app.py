@@ -116,12 +116,98 @@ if not isinstance(df, pd.DataFrame):
     df = pd.DataFrame(columns=COLUMNS)
 
 
+# Đảm bảo đủ cột
 for column in COLUMNS:
+
     if column not in df.columns:
-        df[column] = False if column == "Trạng thái" else ""
+
+        if column == "Trạng thái":
+            df[column] = False
+
+        elif column == "Deadline":
+            df[column] = pd.NaT
+
+        else:
+            df[column] = ""
 
 
 df = df[COLUMNS].copy()
+
+
+# =========================================================
+# CHUẨN HÓA DEADLINE
+# =========================================================
+
+df["Deadline"] = pd.to_datetime(
+    df["Deadline"],
+    errors="coerce",
+    dayfirst=True,
+)
+
+
+# =========================================================
+# SORT PRIORITY
+# =========================================================
+
+st.markdown("#### Sắp xếp công việc")
+
+sort_option = st.selectbox(
+    "Sắp xếp theo mức độ ưu tiên",
+    [
+        "Mặc định",
+        "Cao → Thấp",
+        "Thấp → Cao",
+    ],
+)
+
+
+priority_high_to_low = {
+    "Cao": 1,
+    "Trung bình": 2,
+    "Thấp": 3,
+}
+
+priority_low_to_high = {
+    "Thấp": 1,
+    "Trung bình": 2,
+    "Cao": 3,
+}
+
+
+if sort_option == "Cao → Thấp":
+
+    df["_priority_order"] = (
+        df["Mức độ ưu tiên"]
+        .map(priority_high_to_low)
+        .fillna(99)
+    )
+
+    df = (
+        df.sort_values(
+            "_priority_order",
+            kind="stable",
+        )
+        .drop(columns=["_priority_order"])
+        .reset_index(drop=True)
+    )
+
+
+elif sort_option == "Thấp → Cao":
+
+    df["_priority_order"] = (
+        df["Mức độ ưu tiên"]
+        .map(priority_low_to_high)
+        .fillna(99)
+    )
+
+    df = (
+        df.sort_values(
+            "_priority_order",
+            kind="stable",
+        )
+        .drop(columns=["_priority_order"])
+        .reset_index(drop=True)
+    )
 
 
 # =========================================================
@@ -129,6 +215,7 @@ df = df[COLUMNS].copy()
 # =========================================================
 
 if not df.empty:
+
     valid_mask = (
         df["Tên công việc"]
         .astype(str)
@@ -136,30 +223,49 @@ if not df.empty:
         != ""
     )
 
-    total_tasks = int(valid_mask.sum())
+    total_tasks = int(
+        valid_mask.sum()
+    )
 
 else:
+
+    valid_mask = pd.Series(
+        dtype=bool
+    )
+
     total_tasks = 0
 
 
 if total_tasks > 0:
+
     completed_tasks = int(
-        df.loc[valid_mask, "Trạng thái"]
+        df.loc[
+            valid_mask,
+            "Trạng thái",
+        ]
         .fillna(False)
         .astype(bool)
         .sum()
     )
 
 else:
+
     completed_tasks = 0
 
 
-pending_tasks = total_tasks - completed_tasks
+pending_tasks = (
+    total_tasks
+    - completed_tasks
+)
 
 
 overall_percent = (
-    completed_tasks / total_tasks * 100
+    completed_tasks
+    / total_tasks
+    * 100
+
     if total_tasks > 0
+
     else 0.0
 )
 
@@ -196,33 +302,46 @@ st.divider()
 # =========================================================
 
 column_config = {
-    "Tên công việc": st.column_config.TextColumn(
-        "Công việc",
-        required=True,
-        width="large",
-    ),
 
-    "Mức độ ưu tiên": st.column_config.SelectboxColumn(
-        "Mức độ ưu tiên",
-        options=[
-            "Cao",
-            "Trung bình",
-            "Thấp",
-        ],
-        default="Trung bình",
-        width="medium",
-    ),
+    "Tên công việc":
+        st.column_config.TextColumn(
+            "Công việc",
+            required=True,
+            width="large",
+        ),
 
-    "Deadline": st.column_config.TextColumn(
-        "Deadline (nếu có)",
-        width="medium",
-    ),
+    "Mức độ ưu tiên":
+        st.column_config.SelectboxColumn(
+            "Mức độ ưu tiên",
+            options=[
+                "Cao",
+                "Trung bình",
+                "Thấp",
+            ],
+            default="Trung bình",
+            width="medium",
+        ),
 
-    "Trạng thái": st.column_config.CheckboxColumn(
-        "Trạng thái",
-        default=False,
-        width="small",
-    ),
+    "Deadline":
+        st.column_config.DatetimeColumn(
+            "Deadline",
+            format="DD/MM/YYYY HH:mm",
+            step=900,
+            width="medium",
+        ),
+
+    "Ghi chú":
+        st.column_config.TextColumn(
+            "Ghi chú",
+            width="large",
+        ),
+
+    "Trạng thái":
+        st.column_config.CheckboxColumn(
+            "Trạng thái",
+            default=False,
+            width="small",
+        ),
 }
 
 
@@ -235,7 +354,7 @@ edited_df = st.data_editor(
     num_rows="dynamic",
     use_container_width=True,
     column_config=column_config,
-    key=f"editor_simple_{selected_year}_{selected_week}",
+    key=f"editor_simple_{selected_year}_{selected_week}_{sort_option}",
 )
 
 
@@ -250,6 +369,8 @@ if st.button(
 
     clean_df = edited_df.copy()
 
+
+    # Chỉ giữ dòng có tên công việc
     clean_df = clean_df[
         clean_df["Tên công việc"]
         .astype(str)
@@ -258,11 +379,19 @@ if st.button(
     ].copy()
 
 
+    # Đảm bảo đủ cột
     for column in COLUMNS:
+
         if column not in clean_df.columns:
-            clean_df[column] = (
-                False if column == "Trạng thái" else ""
-            )
+
+            if column == "Trạng thái":
+                clean_df[column] = False
+
+            elif column == "Deadline":
+                clean_df[column] = pd.NaT
+
+            else:
+                clean_df[column] = ""
 
 
     clean_df = clean_df[COLUMNS]
@@ -289,7 +418,9 @@ if st.button(
 
     if success:
 
-        st.session_state[week_key] = clean_df
+        st.session_state[
+            week_key
+        ] = clean_df
 
         st.success(
             f"Đã lưu tiến độ Tuần "
@@ -318,6 +449,7 @@ if not edited_df.empty:
     ].copy()
 
 else:
+
     report_df = pd.DataFrame(
         columns=COLUMNS
     )
@@ -325,15 +457,21 @@ else:
 
 if not report_df.empty:
 
-    report_df["Trạng thái"] = (
-        report_df["Trạng thái"]
+    report_df[
+        "Trạng thái"
+    ] = (
+        report_df[
+            "Trạng thái"
+        ]
         .fillna(False)
         .astype(bool)
     )
 
 
     pending_df = report_df[
-        ~report_df["Trạng thái"]
+        ~report_df[
+            "Trạng thái"
+        ]
     ]
 
 
@@ -352,27 +490,63 @@ if not report_df.empty:
         for _, row in pending_df.iterrows():
 
             task_name = str(
-                row.get("Tên công việc", "")
+                row.get(
+                    "Tên công việc",
+                    "",
+                )
             ).strip()
+
 
             priority = str(
-                row.get("Mức độ ưu tiên", "")
+                row.get(
+                    "Mức độ ưu tiên",
+                    "",
+                )
             ).strip()
 
-            deadline = str(
-                row.get("Deadline", "")
+
+            note = str(
+                row.get(
+                    "Ghi chú",
+                    "",
+                )
             ).strip()
+
+
+            deadline_value = row.get(
+                "Deadline",
+                pd.NaT,
+            )
 
 
             deadline_str = ""
 
-            if (
-                deadline
-                and deadline.lower() != "nan"
+            if pd.notna(
+                deadline_value
             ):
 
+                deadline_value = pd.to_datetime(
+                    deadline_value
+                )
+
                 deadline_str = (
-                    f" | Deadline: {deadline}"
+                    " | Deadline: "
+                    + deadline_value.strftime(
+                        "%d/%m/%Y %H:%M"
+                    )
+                )
+
+
+            note_str = ""
+
+            if (
+                note
+                and note.lower()
+                != "nan"
+            ):
+
+                note_str = (
+                    f" | Ghi chú: {note}"
                 )
 
 
@@ -380,8 +554,10 @@ if not report_df.empty:
                 f"- **{task_name}** "
                 f"(Mức độ: "
                 f"{priority}"
-                f"{deadline_str})"
+                f"{deadline_str}"
+                f"{note_str})"
             )
+
 
     else:
 
