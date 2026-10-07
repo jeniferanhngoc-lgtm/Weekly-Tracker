@@ -113,8 +113,18 @@ ai_key = (
     f"{selected_week}"
 )
 
+ai_source_key = (
+    f"{ai_key}_source"
+)
+
 sort_key = (
     f"sort_option_"
+    f"{selected_year}_"
+    f"{selected_week}"
+)
+
+editor_key = (
+    f"editor_simple_"
     f"{selected_year}_"
     f"{selected_week}"
 )
@@ -164,13 +174,11 @@ df = df[COLUMNS].copy()
 # NORMALIZE DEADLINE
 # =========================================================
 
-if "Deadline" in df.columns:
-
-    df["Deadline"] = pd.to_datetime(
-        df["Deadline"],
-        errors="coerce",
-        dayfirst=True,
-    )
+df["Deadline"] = pd.to_datetime(
+    df["Deadline"],
+    errors="coerce",
+    dayfirst=True,
+)
 
 
 # =========================================================
@@ -334,316 +342,6 @@ st.divider()
 
 
 # =========================================================
-# AI SECTION
-# =========================================================
-
-st.subheader(
-    "AI hỗ trợ sắp xếp công việc"
-)
-
-st.caption(
-    "AI chỉ đề xuất thứ tự thực hiện trong tuần. "
-    "Không tự thay đổi deadline, mức độ ưu tiên, ghi chú hoặc trạng thái."
-)
-
-
-tasks_for_ai = df[
-    df["Tên công việc"]
-    .astype(str)
-    .str.strip()
-    != ""
-].copy()
-
-
-if st.button(
-    "🤖 AI gợi ý thứ tự công việc",
-    key=f"btn_ai_{selected_year}_{selected_week}",
-):
-
-    if tasks_for_ai.empty:
-
-        st.warning(
-            "Chưa có công việc để AI phân tích."
-        )
-
-    else:
-
-        with st.spinner(
-            "AI đang phân tích mức độ ưu tiên, deadline và ghi chú..."
-        ):
-
-            try:
-
-                ai_result = suggest_task_order(
-                    tasks_for_ai
-                )
-
-
-                if not ai_result:
-
-                    st.warning(
-                        "AI chưa trả về gợi ý nào."
-                    )
-
-                else:
-
-                    st.session_state[
-                        ai_key
-                    ] = ai_result
-
-
-            except Exception as e:
-
-                st.error(
-                    "Không thể lấy gợi ý từ AI."
-                )
-
-                st.code(
-                    f"{type(e).__name__}: {e}"
-                )
-
-
-# =========================================================
-# AI PREVIEW
-# =========================================================
-
-if ai_key in st.session_state:
-
-    ai_result = st.session_state[
-        ai_key
-    ]
-
-
-    st.markdown(
-        "#### Thứ tự AI đề xuất"
-    )
-
-
-    preview_rows = []
-
-
-    for position, item in enumerate(
-        ai_result,
-        start=1,
-    ):
-
-        task_id = item.get(
-            "id"
-        )
-
-
-        if task_id not in df.index:
-            continue
-
-
-        row = df.loc[
-            task_id
-        ]
-
-
-        deadline_value = row.get(
-            "Deadline",
-            pd.NaT,
-        )
-
-
-        if pd.notna(
-            deadline_value
-        ):
-
-            deadline_value = pd.to_datetime(
-                deadline_value,
-                errors="coerce",
-            )
-
-
-            if pd.notna(
-                deadline_value
-            ):
-
-                deadline_display = (
-                    deadline_value.strftime(
-                        "%d/%m/%Y %H:%M"
-                    )
-                )
-
-            else:
-
-                deadline_display = ""
-
-        else:
-
-            deadline_display = ""
-
-
-        preview_rows.append(
-            {
-                "Thứ tự": position,
-
-                "Công việc":
-                    row.get(
-                        "Tên công việc",
-                        "",
-                    ),
-
-                "Ưu tiên":
-                    row.get(
-                        "Mức độ ưu tiên",
-                        "",
-                    ),
-
-                "Deadline":
-                    deadline_display,
-
-                "Ghi chú":
-                    row.get(
-                        "Ghi chú",
-                        "",
-                    ),
-
-                "Lý do AI":
-                    item.get(
-                        "reason",
-                        "",
-                    ),
-            }
-        )
-
-
-    preview_df = pd.DataFrame(
-        preview_rows
-    )
-
-
-    if not preview_df.empty:
-
-        st.dataframe(
-            preview_df,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-
-    col_accept, col_cancel = st.columns(2)
-
-
-    # =====================================================
-    # ACCEPT AI ORDER
-    # =====================================================
-
-    with col_accept:
-
-        if st.button(
-            "✅ Chấp nhận thứ tự AI",
-            type="primary",
-            key=f"accept_ai_{selected_year}_{selected_week}",
-        ):
-
-            ordered_ids = []
-
-
-            for item in ai_result:
-
-                task_id = item.get(
-                    "id"
-                )
-
-
-                if (
-                    task_id
-                    in df.index
-                    and task_id
-                    not in ordered_ids
-                ):
-
-                    ordered_ids.append(
-                        task_id
-                    )
-
-
-            # Giữ các task còn lại nếu AI không trả đủ
-            remaining_ids = [
-                idx
-                for idx in df.index
-                if idx not in ordered_ids
-            ]
-
-
-            new_order = (
-                ordered_ids
-                + remaining_ids
-            )
-
-
-            sorted_df = (
-                df.loc[
-                    new_order
-                ]
-                .reset_index(
-                    drop=True
-                )
-            )
-
-
-            st.session_state[
-                week_key
-            ] = sorted_df
-
-
-            del st.session_state[
-                ai_key
-            ]
-
-
-            # Đưa sort thủ công về mặc định
-            st.session_state[
-                sort_key
-            ] = "Mặc định"
-
-
-            # Xóa state editor để bảng nhận thứ tự mới
-            editor_key = (
-                f"editor_simple_"
-                f"{selected_year}_"
-                f"{selected_week}"
-            )
-
-
-            if (
-                editor_key
-                in st.session_state
-            ):
-
-                del st.session_state[
-                    editor_key
-                ]
-
-
-            st.rerun()
-
-
-    # =====================================================
-    # CANCEL AI
-    # =====================================================
-
-    with col_cancel:
-
-        if st.button(
-            "❌ Bỏ gợi ý AI",
-            key=f"cancel_ai_{selected_year}_{selected_week}",
-        ):
-
-            del st.session_state[
-                ai_key
-            ]
-
-            st.rerun()
-
-
-st.divider()
-
-
-# =========================================================
 # TABLE CONFIG
 # =========================================================
 
@@ -695,13 +393,6 @@ column_config = {
 # DATA EDITOR
 # =========================================================
 
-editor_key = (
-    f"editor_simple_"
-    f"{selected_year}_"
-    f"{selected_week}"
-)
-
-
 edited_df = st.data_editor(
     display_df,
     num_rows="dynamic",
@@ -712,8 +403,351 @@ edited_df = st.data_editor(
 
 
 # =========================================================
+# AI TASK SORTING
+# =========================================================
+
+st.divider()
+
+st.subheader(
+    "AI hỗ trợ sắp xếp công việc"
+)
+
+st.caption(
+    "AI phân tích trực tiếp các công việc đang có trong bảng, "
+    "kể cả những thay đổi chưa lưu lên Google Sheets."
+)
+
+
+tasks_for_ai = edited_df.copy()
+
+
+# Chỉ giữ các dòng có tên công việc
+tasks_for_ai = tasks_for_ai[
+    tasks_for_ai["Tên công việc"]
+    .astype(str)
+    .str.strip()
+    != ""
+].copy()
+
+
+# Reset index để AI nhận ID ổn định
+tasks_for_ai = tasks_for_ai.reset_index(
+    drop=True
+)
+
+
+if st.button(
+    "🤖 AI gợi ý thứ tự công việc",
+    key=f"btn_ai_{selected_year}_{selected_week}",
+):
+
+    if tasks_for_ai.empty:
+
+        st.warning(
+            "Chưa có công việc để AI phân tích."
+        )
+
+    else:
+
+        with st.spinner(
+            "AI đang phân tích mức độ ưu tiên, deadline và ghi chú..."
+        ):
+
+            try:
+
+                ai_result = suggest_task_order(
+                    tasks_for_ai
+                )
+
+
+                if not ai_result:
+
+                    st.warning(
+                        "AI chưa trả về gợi ý nào."
+                    )
+
+                else:
+
+                    st.session_state[
+                        ai_key
+                    ] = ai_result
+
+                    st.session_state[
+                        ai_source_key
+                    ] = tasks_for_ai.copy()
+
+                    st.rerun()
+
+
+            except Exception as e:
+
+                st.error(
+                    "Không thể lấy gợi ý từ AI."
+                )
+
+                st.code(
+                    f"{type(e).__name__}: {e}"
+                )
+
+
+# =========================================================
+# AI PREVIEW
+# =========================================================
+
+if (
+    ai_key in st.session_state
+    and
+    ai_source_key in st.session_state
+):
+
+    ai_result = st.session_state[
+        ai_key
+    ]
+
+    ai_source_df = st.session_state[
+        ai_source_key
+    ].copy()
+
+
+    st.markdown(
+        "#### Thứ tự AI đề xuất"
+    )
+
+
+    preview_rows = []
+
+
+    for position, item in enumerate(
+        ai_result,
+        start=1,
+    ):
+
+        task_id = item.get(
+            "id"
+        )
+
+
+        if task_id not in ai_source_df.index:
+            continue
+
+
+        row = ai_source_df.loc[
+            task_id
+        ]
+
+
+        deadline_value = row.get(
+            "Deadline",
+            pd.NaT,
+        )
+
+
+        deadline_display = ""
+
+
+        if pd.notna(
+            deadline_value
+        ):
+
+            deadline_value = pd.to_datetime(
+                deadline_value,
+                errors="coerce",
+            )
+
+
+            if pd.notna(
+                deadline_value
+            ):
+
+                deadline_display = (
+                    deadline_value.strftime(
+                        "%d/%m/%Y %H:%M"
+                    )
+                )
+
+
+        note_value = row.get(
+            "Ghi chú",
+            "",
+        )
+
+
+        if pd.isna(note_value):
+            note_value = ""
+
+
+        preview_rows.append(
+            {
+                "Thứ tự": position,
+
+                "Công việc":
+                    row.get(
+                        "Tên công việc",
+                        "",
+                    ),
+
+                "Ưu tiên":
+                    row.get(
+                        "Mức độ ưu tiên",
+                        "",
+                    ),
+
+                "Deadline":
+                    deadline_display,
+
+                "Ghi chú":
+                    note_value,
+
+                "Lý do AI":
+                    item.get(
+                        "reason",
+                        "",
+                    ),
+            }
+        )
+
+
+    preview_df = pd.DataFrame(
+        preview_rows
+    )
+
+
+    if not preview_df.empty:
+
+        st.dataframe(
+            preview_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
+    col_accept, col_cancel = st.columns(2)
+
+
+    # =====================================================
+    # ACCEPT AI ORDER
+    # =====================================================
+
+    with col_accept:
+
+        if st.button(
+            "✅ Chấp nhận thứ tự AI",
+            type="primary",
+            key=f"accept_ai_{selected_year}_{selected_week}",
+        ):
+
+            ordered_ids = []
+
+
+            for item in ai_result:
+
+                task_id = item.get(
+                    "id"
+                )
+
+
+                if (
+                    task_id
+                    in ai_source_df.index
+                    and
+                    task_id
+                    not in ordered_ids
+                ):
+
+                    ordered_ids.append(
+                        task_id
+                    )
+
+
+            remaining_ids = [
+                idx
+                for idx
+                in ai_source_df.index
+                if idx not in ordered_ids
+            ]
+
+
+            final_order = (
+                ordered_ids
+                + remaining_ids
+            )
+
+
+            sorted_df = (
+                ai_source_df.loc[
+                    final_order
+                ]
+                .reset_index(
+                    drop=True
+                )
+            )
+
+
+            # Đưa dữ liệu AI đã sắp về bảng chính
+            st.session_state[
+                week_key
+            ] = sorted_df
+
+
+            # Xóa kết quả AI cũ
+            del st.session_state[
+                ai_key
+            ]
+
+            del st.session_state[
+                ai_source_key
+            ]
+
+
+            # Sort thủ công quay về mặc định
+            st.session_state[
+                sort_key
+            ] = "Mặc định"
+
+
+            # Xóa state editor cũ
+            # để bảng dựng lại theo thứ tự mới
+            if (
+                editor_key
+                in st.session_state
+            ):
+
+                del st.session_state[
+                    editor_key
+                ]
+
+
+            st.rerun()
+
+
+    # =====================================================
+    # CANCEL AI
+    # =====================================================
+
+    with col_cancel:
+
+        if st.button(
+            "❌ Bỏ gợi ý AI",
+            key=f"cancel_ai_{selected_year}_{selected_week}",
+        ):
+
+            del st.session_state[
+                ai_key
+            ]
+
+            del st.session_state[
+                ai_source_key
+            ]
+
+            st.rerun()
+
+
+# =========================================================
 # SAVE BUTTON
 # =========================================================
+
+st.divider()
+
 
 if st.button(
     "💾 Lưu & Đồng bộ Google Sheets",
@@ -790,11 +824,18 @@ if st.button(
         )
 
 
-        # Nếu còn preview AI cũ thì xóa
+        # Xóa preview AI cũ nếu còn
         if ai_key in st.session_state:
 
             del st.session_state[
                 ai_key
+            ]
+
+
+        if ai_source_key in st.session_state:
+
+            del st.session_state[
+                ai_source_key
             ]
 
 
@@ -878,12 +919,19 @@ if not report_df.empty:
             ).strip()
 
 
-            note = str(
-                row.get(
-                    "Ghi chú",
-                    "",
-                )
-            ).strip()
+            note = row.get(
+                "Ghi chú",
+                "",
+            )
+
+
+            if pd.isna(note):
+                note = ""
+
+            else:
+                note = str(
+                    note
+                ).strip()
 
 
             deadline_value = row.get(
@@ -920,14 +968,7 @@ if not report_df.empty:
             note_str = ""
 
 
-            if (
-                note
-                and note.lower()
-                not in [
-                    "nan",
-                    "none",
-                ]
-            ):
+            if note:
 
                 note_str = (
                     f" | Ghi chú: {note}"
@@ -949,10 +990,6 @@ if not report_df.empty:
             "Tất cả công việc trong tuần đã hoàn thành!"
         )
 
-
-# =========================================================
-# EMPTY STATE
-# =========================================================
 
 elif total_tasks == 0:
 
