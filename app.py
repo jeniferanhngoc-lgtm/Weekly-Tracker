@@ -395,13 +395,6 @@ column_config = {
             default=False,
             width="small",
         ),
-
-    "Nguồn":
-        st.column_config.TextColumn(
-            "Nguồn",
-            disabled=True,
-            width="medium",
-        ),
 }
 
 
@@ -421,18 +414,14 @@ edited_df = st.data_editor(
     ),
 
     column_order=[
-        "Tên công việc",
-        "Mức độ ưu tiên",
-        "Deadline",
-        "Ghi chú",
-        "Nguồn",
-        "Trạng thái",
+    "Tên công việc",
+    "Mức độ ưu tiên",
+    "Deadline",
+    "Ghi chú",
+    "Trạng thái",
     ],
 
-    disabled=[
-        "Nguồn",
-    ],
-
+   
     key=editor_key,
 )
 
@@ -813,12 +802,6 @@ if (
                 "Deadline":
                     deadline_text,
 
-                "Nguồn":
-                    row.get(
-                        "Nguồn",
-                        "",
-                    ),
-
                 "Lý do":
                     item.get(
                         "reason",
@@ -1046,14 +1029,6 @@ else:
         )
 
 
-        source = str(
-            row.get(
-                "Nguồn",
-                "",
-            )
-        )
-
-
         deadline = row.get(
             "Deadline",
             pd.NaT,
@@ -1077,9 +1052,8 @@ else:
             )
 
 
-        st.write(
+           st.write(
             f"- **{task}** "
-            f"| {priority} "
-            f"| {source}"
+            f"| {priority}"
             f"{deadline_text}"
         )
