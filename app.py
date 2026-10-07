@@ -9,7 +9,9 @@ from sheets_db import (
     save_weekly_sheet,
 )
 
-from task_scheduler import suggest_task_order
+from task_scheduler import (
+    suggest_task_order,
+)
 
 
 # =========================================================
@@ -22,24 +24,31 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("Quản Lý Công Việc Theo Tuần")
+st.title(
+    "Quản Lý Công Việc Theo Tuần"
+)
 
 
 # =========================================================
-# CURRENT DATE / WEEK
+# CURRENT WEEK
 # =========================================================
 
 today = datetime.date.today()
-current_year, current_week, _ = today.isocalendar()
+
+current_year, current_week, _ = (
+    today.isocalendar()
+)
 
 
 # =========================================================
-# SELECT YEAR / WEEK
+# WEEK SELECTOR
 # =========================================================
 
-col_select1, col_select2 = st.columns(2)
+col_year, col_week = st.columns(2)
 
-with col_select1:
+
+with col_year:
+
     selected_year = st.number_input(
         "Năm",
         min_value=2024,
@@ -48,7 +57,9 @@ with col_select1:
         step=1,
     )
 
-with col_select2:
+
+with col_week:
+
     selected_week = st.number_input(
         "Tuần thứ",
         min_value=1,
@@ -58,31 +69,47 @@ with col_select2:
     )
 
 
-selected_year = int(selected_year)
-selected_week = int(selected_week)
+selected_year = int(
+    selected_year
+)
+
+selected_week = int(
+    selected_week
+)
 
 
 # =========================================================
-# WEEK DATE RANGE
+# WEEK RANGE
 # =========================================================
 
 try:
-    first_day_of_week = datetime.date.fromisocalendar(
-        selected_year,
-        selected_week,
-        1,
+
+    first_day_of_week = (
+        datetime.date.fromisocalendar(
+            selected_year,
+            selected_week,
+            1,
+        )
     )
 
-    last_day_of_week = datetime.date.fromisocalendar(
-        selected_year,
-        selected_week,
-        7,
+
+    last_day_of_week = (
+        datetime.date.fromisocalendar(
+            selected_year,
+            selected_week,
+            7,
+        )
     )
+
 
 except ValueError:
+
     st.error(
-        f"Tuần {selected_week} không tồn tại trong năm {selected_year}."
+        f"Tuần {selected_week} "
+        f"không tồn tại trong "
+        f"năm {selected_year}."
     )
+
     st.stop()
 
 
@@ -92,39 +119,58 @@ time_range_str = (
     f"{last_day_of_week.strftime('%d/%m/%Y')}"
 )
 
+
 st.subheader(
-    f"Tuần {selected_week} ({time_range_str})"
+    f"Tuần {selected_week} "
+    f"({time_range_str})"
+)
+
+
+week_start_ts = pd.Timestamp(
+    first_day_of_week
+)
+
+week_end_ts = (
+    pd.Timestamp(
+        last_day_of_week
+    )
+    + pd.Timedelta(days=1)
+    - pd.Timedelta(seconds=1)
 )
 
 
 # =========================================================
-# SESSION STATE KEYS
+# SESSION KEYS
 # =========================================================
 
 week_key = (
-    f"df_simple_"
+    f"weekly_data_"
     f"{selected_year}_"
     f"{selected_week}"
 )
 
-ai_key = (
-    f"ai_task_order_"
-    f"{selected_year}_"
-    f"{selected_week}"
-)
-
-ai_source_key = (
-    f"{ai_key}_source"
-)
-
-sort_key = (
-    f"sort_option_"
-    f"{selected_year}_"
-    f"{selected_week}"
-)
 
 editor_key = (
-    f"editor_simple_"
+    f"editor_"
+    f"{selected_year}_"
+    f"{selected_week}"
+)
+
+
+suggest_key = (
+    f"suggest_"
+    f"{selected_year}_"
+    f"{selected_week}"
+)
+
+
+suggest_source_key = (
+    f"{suggest_key}_source"
+)
+
+
+sort_key = (
+    f"sort_"
     f"{selected_year}_"
     f"{selected_week}"
 )
@@ -136,60 +182,84 @@ editor_key = (
 
 if week_key not in st.session_state:
 
-    st.session_state[week_key] = load_weekly_sheet(
+    st.session_state[
+        week_key
+    ] = load_weekly_sheet(
         selected_year,
         selected_week,
     )
 
 
-df = st.session_state[week_key]
-
-
-if not isinstance(df, pd.DataFrame):
-    df = pd.DataFrame(columns=COLUMNS)
+df = st.session_state[
+    week_key
+].copy()
 
 
 # =========================================================
-# NORMALIZE COLUMNS
+# ENSURE DISPLAY COLUMNS
 # =========================================================
 
-for column in COLUMNS:
+required_columns = [
+    "Task ID",
+    "Năm gốc",
+    "Tuần gốc",
+    "Mốc thời gian",
+    "Ngày hoàn thành",
+    "Tên công việc",
+    "Mức độ ưu tiên",
+    "Deadline",
+    "Ghi chú",
+    "Trạng thái",
+    "Nguồn",
+]
+
+
+for column in required_columns:
 
     if column not in df.columns:
 
         if column == "Trạng thái":
             df[column] = False
 
-        elif column == "Deadline":
+        elif column in [
+            "Deadline",
+            "Ngày hoàn thành",
+        ]:
             df[column] = pd.NaT
 
         else:
             df[column] = ""
 
 
-df = df[COLUMNS].copy()
-
-
-# =========================================================
-# NORMALIZE DEADLINE
-# =========================================================
-
-df["Deadline"] = pd.to_datetime(
+df[
+    "Deadline"
+] = pd.to_datetime(
     df["Deadline"],
     errors="coerce",
     dayfirst=True,
 )
 
 
+df[
+    "Ngày hoàn thành"
+] = pd.to_datetime(
+    df["Ngày hoàn thành"],
+    errors="coerce",
+    dayfirst=True,
+)
+
+
 # =========================================================
-# SORT OPTION
+# SORT
 # =========================================================
 
-st.markdown("#### Sắp xếp công việc")
+st.markdown(
+    "#### Sắp xếp công việc"
+)
 
 
 sort_option = st.selectbox(
-    "Sắp xếp theo mức độ ưu tiên",
+    "Thứ tự hiển thị",
     [
         "Mặc định",
         "Cao → Thấp",
@@ -199,146 +269,83 @@ sort_option = st.selectbox(
 )
 
 
-priority_high_to_low = {
-    "Cao": 1,
-    "Trung bình": 2,
-    "Thấp": 3,
-}
-
-priority_low_to_high = {
-    "Thấp": 1,
-    "Trung bình": 2,
-    "Cao": 3,
-}
-
-
 display_df = df.copy()
+
+
+priority_high = {
+    "Cao": 0,
+    "Trung bình": 1,
+    "Thấp": 2,
+}
+
+
+priority_low = {
+    "Thấp": 0,
+    "Trung bình": 1,
+    "Cao": 2,
+}
 
 
 if sort_option == "Cao → Thấp":
 
-    display_df["_priority_order"] = (
-        display_df["Mức độ ưu tiên"]
-        .map(priority_high_to_low)
+    display_df[
+        "_priority"
+    ] = (
+        display_df[
+            "Mức độ ưu tiên"
+        ]
+        .map(
+            priority_high
+        )
         .fillna(99)
     )
 
+
     display_df = (
-        display_df
-        .sort_values(
-            "_priority_order",
+        display_df.sort_values(
+            "_priority",
             kind="stable",
         )
         .drop(
-            columns=["_priority_order"]
+            columns=[
+                "_priority"
+            ]
         )
-        .reset_index(drop=True)
+        .reset_index(
+            drop=True
+        )
     )
 
 
 elif sort_option == "Thấp → Cao":
 
-    display_df["_priority_order"] = (
-        display_df["Mức độ ưu tiên"]
-        .map(priority_low_to_high)
+    display_df[
+        "_priority"
+    ] = (
+        display_df[
+            "Mức độ ưu tiên"
+        ]
+        .map(
+            priority_low
+        )
         .fillna(99)
     )
 
+
     display_df = (
-        display_df
-        .sort_values(
-            "_priority_order",
+        display_df.sort_values(
+            "_priority",
             kind="stable",
         )
         .drop(
-            columns=["_priority_order"]
+            columns=[
+                "_priority"
+            ]
         )
-        .reset_index(drop=True)
+        .reset_index(
+            drop=True
+        )
     )
-
-
-# =========================================================
-# METRICS
-# =========================================================
-
-if not df.empty:
-
-    valid_mask = (
-        df["Tên công việc"]
-        .astype(str)
-        .str.strip()
-        != ""
-    )
-
-    total_tasks = int(
-        valid_mask.sum()
-    )
-
-else:
-
-    valid_mask = pd.Series(dtype=bool)
-    total_tasks = 0
-
-
-if total_tasks > 0:
-
-    completed_tasks = int(
-        df.loc[
-            valid_mask,
-            "Trạng thái",
-        ]
-        .fillna(False)
-        .astype(bool)
-        .sum()
-    )
-
-else:
-
-    completed_tasks = 0
-
-
-pending_tasks = (
-    total_tasks
-    - completed_tasks
-)
-
-
-overall_percent = (
-    completed_tasks
-    / total_tasks
-    * 100
-
-    if total_tasks > 0
-
-    else 0.0
-)
-
-
-metric1, metric2, metric3 = st.columns(3)
-
-metric1.metric(
-    "Tổng công việc",
-    total_tasks,
-)
-
-metric2.metric(
-    "Đã hoàn thành",
-    f"{completed_tasks} ({overall_percent:.1f}%)",
-)
-
-metric3.metric(
-    "Chưa hoàn thành",
-    pending_tasks,
-)
-
-
-st.progress(
-    overall_percent / 100
-    if total_tasks > 0
-    else 0.0
-)
-
-st.divider()
 
 
 # =========================================================
@@ -369,7 +376,9 @@ column_config = {
     "Deadline":
         st.column_config.DatetimeColumn(
             "Deadline",
-            format="DD/MM/YYYY HH:mm",
+            format=(
+                "DD/MM/YYYY HH:mm"
+            ),
             step=900,
             width="medium",
         ),
@@ -382,201 +391,412 @@ column_config = {
 
     "Trạng thái":
         st.column_config.CheckboxColumn(
-            "Trạng thái",
+            "Hoàn thành",
             default=False,
             width="small",
+        ),
+
+    "Nguồn":
+        st.column_config.TextColumn(
+            "Nguồn",
+            disabled=True,
+            width="medium",
         ),
 }
 
 
 # =========================================================
-# DATA EDITOR
+# EDITOR
 # =========================================================
 
 edited_df = st.data_editor(
     display_df,
+
     num_rows="dynamic",
+
     use_container_width=True,
-    column_config=column_config,
+
+    column_config=(
+        column_config
+    ),
+
+    column_order=[
+        "Tên công việc",
+        "Mức độ ưu tiên",
+        "Deadline",
+        "Ghi chú",
+        "Nguồn",
+        "Trạng thái",
+    ],
+
+    disabled=[
+        "Nguồn",
+    ],
+
     key=editor_key,
 )
 
 
 # =========================================================
-# AI TASK SORTING
+# LIVE METRICS
 # =========================================================
 
-st.divider()
-
-st.subheader("Gợi ý sắp xếp công việc")
-
-st.caption(
-    "AI phân tích trực tiếp các công việc đang có trong bảng, "
-    "kể cả những thay đổi chưa lưu lên Google Sheets."
-)
-
-
-tasks_for_ai = edited_df.copy()
-
-
-# Chỉ giữ các dòng có tên công việc
-tasks_for_ai = tasks_for_ai[
-    tasks_for_ai["Tên công việc"]
+valid_df = edited_df[
+    edited_df[
+        "Tên công việc"
+    ]
     .astype(str)
     .str.strip()
     != ""
 ].copy()
 
 
-# Reset index để AI nhận ID ổn định
-tasks_for_ai = tasks_for_ai.reset_index(
-    drop=True
+# ---------------------------------------------------------
+# TASK SINH RA TUẦN NÀY
+# ---------------------------------------------------------
+
+origin_this_week = (
+    pd.to_numeric(
+        valid_df[
+            "Năm gốc"
+        ],
+        errors="coerce",
+    )
+    == selected_year
+) & (
+    pd.to_numeric(
+        valid_df[
+            "Tuần gốc"
+        ],
+        errors="coerce",
+    )
+    == selected_week
+)
+
+
+# Các dòng mới chưa có tuần gốc
+new_rows = (
+    pd.to_numeric(
+        valid_df[
+            "Năm gốc"
+        ],
+        errors="coerce",
+    ).isna()
+)
+
+
+origin_this_week = (
+    origin_this_week
+    |
+    new_rows
+)
+
+
+this_week_df = valid_df[
+    origin_this_week
+].copy()
+
+
+carryover_df = valid_df[
+    ~origin_this_week
+].copy()
+
+
+total_this_week = len(
+    this_week_df
+)
+
+
+# =========================================================
+# ON-TIME COMPLETION
+# =========================================================
+
+completed_on_time = 0
+
+late_from_this_week = 0
+
+
+for _, row in this_week_df.iterrows():
+
+    completion = pd.to_datetime(
+        row.get(
+            "Ngày hoàn thành"
+        ),
+        errors="coerce",
+    )
+
+
+    # Nếu task vừa tick trong editor nhưng chưa save,
+    # coi như hoàn thành trong tuần hiện tại
+    # nếu đang xem chính tuần hiện tại.
+    if (
+        bool(
+            row.get(
+                "Trạng thái",
+                False,
+            )
+        )
+        and
+        pd.isna(completion)
+        and
+        selected_year
+        == current_year
+        and
+        selected_week
+        == current_week
+    ):
+
+        completion = pd.Timestamp.now()
+
+
+    if pd.notna(
+        completion
+    ):
+
+        if (
+            week_start_ts
+            <= completion
+            <= week_end_ts
+        ):
+
+            completed_on_time += 1
+
+        elif completion > week_end_ts:
+
+            late_from_this_week += 1
+
+
+completion_percent = (
+    completed_on_time
+    / total_this_week
+    * 100
+
+    if total_this_week > 0
+
+    else 0.0
+)
+
+
+pending_this_week = (
+    total_this_week
+    - completed_on_time
+    - late_from_this_week
+)
+
+
+# =========================================================
+# CARRYOVER METRICS
+# =========================================================
+
+carryover_total = len(
+    carryover_df
+)
+
+
+carryover_done = int(
+    carryover_df[
+        "Trạng thái"
+    ]
+    .fillna(False)
+    .astype(bool)
+    .sum()
+)
+
+
+# =========================================================
+# METRIC CARDS
+# =========================================================
+
+st.divider()
+
+
+m1, m2, m3, m4, m5 = (
+    st.columns(5)
+)
+
+
+m1.metric(
+    "Công việc tuần",
+    total_this_week,
+)
+
+
+m2.metric(
+    "Hoàn thành đúng tuần",
+    (
+        f"{completed_on_time} "
+        f"({completion_percent:.1f}%)"
+    ),
+)
+
+
+m3.metric(
+    "Chưa hoàn thành",
+    pending_this_week,
+)
+
+
+m4.metric(
+    "Tồn từ tuần trước",
+    carryover_total,
+)
+
+
+m5.metric(
+    "Đã xử lý tồn",
+    carryover_done,
+)
+
+
+st.progress(
+    completion_percent / 100
+    if total_this_week > 0
+    else 0.0
+)
+
+
+if late_from_this_week > 0:
+
+    st.warning(
+        f"{late_from_this_week} công việc "
+        f"của tuần này được hoàn thành trễ."
+    )
+
+
+# =========================================================
+# LOCAL SCHEDULER
+# =========================================================
+
+st.divider()
+
+st.subheader(
+    "Gợi ý sắp xếp công việc"
+)
+
+
+st.caption(
+    "Gợi ý chạy trực tiếp bằng Python, "
+    "không dùng API và không mất phí."
+)
+
+
+tasks_for_sort = (
+    valid_df.reset_index(
+        drop=True
+    )
 )
 
 
 if st.button(
-    "Gợi ý thứ tự công việc",
-    key=f"btn_ai_{selected_year}_{selected_week}",
+    "✨ Gợi ý thứ tự công việc",
+    key=(
+        f"btn_{suggest_key}"
+    ),
 ):
 
-    if tasks_for_ai.empty:
+    if tasks_for_sort.empty:
 
         st.warning(
-            "Chưa có công việc để AI phân tích."
+            "Chưa có công việc để sắp xếp."
         )
 
     else:
 
-        with st.spinner(
-            "AI đang phân tích mức độ ưu tiên, deadline và ghi chú..."
-        ):
-
-            try:
-
-                ai_result = suggest_task_order(
-                    tasks_for_ai
-                )
-
-
-                if not ai_result:
-
-                    st.warning(
-                        "AI chưa trả về gợi ý nào."
-                    )
-
-                else:
-
-                    st.session_state[
-                        ai_key
-                    ] = ai_result
-
-                    st.session_state[
-                        ai_source_key
-                    ] = tasks_for_ai.copy()
-
-                    st.rerun()
-
-
-            except Exception as e:
-
-                st.error(
-                    "Không thể lấy gợi ý từ AI."
-                )
-
-                st.code(
-                    f"{type(e).__name__}: {e}"
-                )
-
-
-# =========================================================
-# AI PREVIEW
-# =========================================================
-
-if (
-    ai_key in st.session_state
-    and
-    ai_source_key in st.session_state
-):
-
-    ai_result = st.session_state[
-        ai_key
-    ]
-
-    ai_source_df = st.session_state[
-        ai_source_key
-    ].copy()
-
-
-    st.markdown(
-        "#### Thứ tự AI đề xuất"
-    )
-
-
-    preview_rows = []
-
-
-    for position, item in enumerate(
-        ai_result,
-        start=1,
-    ):
-
-        task_id = item.get(
-            "id"
+        result = (
+            suggest_task_order(
+                tasks_for_sort
+            )
         )
 
 
-        if task_id not in ai_source_df.index:
+        st.session_state[
+            suggest_key
+        ] = result
+
+
+        st.session_state[
+            suggest_source_key
+        ] = tasks_for_sort.copy()
+
+
+        st.rerun()
+
+
+# =========================================================
+# PREVIEW SUGGESTION
+# =========================================================
+
+if (
+    suggest_key
+    in st.session_state
+    and
+    suggest_source_key
+    in st.session_state
+):
+
+    suggestions = (
+        st.session_state[
+            suggest_key
+        ]
+    )
+
+
+    source_df = (
+        st.session_state[
+            suggest_source_key
+        ].copy()
+    )
+
+
+    preview = []
+
+
+    for position, item in enumerate(
+        suggestions,
+        start=1,
+    ):
+
+        task_id = item[
+            "id"
+        ]
+
+
+        if task_id not in source_df.index:
             continue
 
 
-        row = ai_source_df.loc[
+        row = source_df.loc[
             task_id
         ]
 
 
-        deadline_value = row.get(
+        deadline = row.get(
             "Deadline",
             pd.NaT,
         )
 
 
-        deadline_display = ""
-
-
         if pd.notna(
-            deadline_value
+            deadline
         ):
 
-            deadline_value = pd.to_datetime(
-                deadline_value,
-                errors="coerce",
+            deadline_text = (
+                pd.to_datetime(
+                    deadline
+                ).strftime(
+                    "%d/%m/%Y %H:%M"
+                )
             )
 
+        else:
 
-            if pd.notna(
-                deadline_value
-            ):
-
-                deadline_display = (
-                    deadline_value.strftime(
-                        "%d/%m/%Y %H:%M"
-                    )
-                )
+            deadline_text = ""
 
 
-        note_value = row.get(
-            "Ghi chú",
-            "",
-        )
-
-
-        if pd.isna(note_value):
-            note_value = ""
-
-
-        preview_rows.append(
+        preview.append(
             {
-                "Thứ tự": position,
+                "Thứ tự":
+                    position,
 
                 "Công việc":
                     row.get(
@@ -591,12 +811,15 @@ if (
                     ),
 
                 "Deadline":
-                    deadline_display,
+                    deadline_text,
 
-                "Ghi chú":
-                    note_value,
+                "Nguồn":
+                    row.get(
+                        "Nguồn",
+                        "",
+                    ),
 
-                "Lý do AI":
+                "Lý do":
                     item.get(
                         "reason",
                         "",
@@ -605,75 +828,54 @@ if (
         )
 
 
-    preview_df = pd.DataFrame(
-        preview_rows
+    st.markdown(
+        "#### Thứ tự được đề xuất"
     )
 
 
-    if not preview_df.empty:
-
-        st.dataframe(
-            preview_df,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-
-    col_accept, col_cancel = st.columns(2)
+    st.dataframe(
+        pd.DataFrame(
+            preview
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
-    # =====================================================
-    # ACCEPT AI ORDER
-    # =====================================================
+    accept_col, cancel_col = (
+        st.columns(2)
+    )
 
-    with col_accept:
+
+    with accept_col:
 
         if st.button(
-            "✅ Chấp nhận thứ tự AI",
+            "✅ Chấp nhận thứ tự",
             type="primary",
-            key=f"accept_ai_{selected_year}_{selected_week}",
         ):
 
-            ordered_ids = []
-
-
-            for item in ai_result:
-
-                task_id = item.get(
-                    "id"
-                )
-
-
-                if (
-                    task_id
-                    in ai_source_df.index
-                    and
-                    task_id
-                    not in ordered_ids
-                ):
-
-                    ordered_ids.append(
-                        task_id
-                    )
+            ordered_ids = [
+                item["id"]
+                for item
+                in suggestions
+                if item["id"]
+                in source_df.index
+            ]
 
 
             remaining_ids = [
                 idx
                 for idx
-                in ai_source_df.index
-                if idx not in ordered_ids
+                in source_df.index
+                if idx
+                not in ordered_ids
             ]
 
 
-            final_order = (
-                ordered_ids
-                + remaining_ids
-            )
-
-
-            sorted_df = (
-                ai_source_df.loc[
-                    final_order
+            ordered_df = (
+                source_df.loc[
+                    ordered_ids
+                    + remaining_ids
                 ]
                 .reset_index(
                     drop=True
@@ -681,30 +883,25 @@ if (
             )
 
 
-            # Đưa dữ liệu AI đã sắp về bảng chính
             st.session_state[
                 week_key
-            ] = sorted_df
+            ] = ordered_df
 
 
-            # Xóa kết quả AI cũ
             del st.session_state[
-                ai_key
+                suggest_key
             ]
 
             del st.session_state[
-                ai_source_key
+                suggest_source_key
             ]
 
 
-            # Sort thủ công quay về mặc định
             st.session_state[
                 sort_key
             ] = "Mặc định"
 
 
-            # Xóa state editor cũ
-            # để bảng dựng lại theo thứ tự mới
             if (
                 editor_key
                 in st.session_state
@@ -718,30 +915,25 @@ if (
             st.rerun()
 
 
-    # =====================================================
-    # CANCEL AI
-    # =====================================================
-
-    with col_cancel:
+    with cancel_col:
 
         if st.button(
-            "❌ Bỏ gợi ý AI",
-            key=f"cancel_ai_{selected_year}_{selected_week}",
+            "❌ Bỏ gợi ý"
         ):
 
             del st.session_state[
-                ai_key
+                suggest_key
             ]
 
             del st.session_state[
-                ai_source_key
+                suggest_source_key
             ]
 
             st.rerun()
 
 
 # =========================================================
-# SAVE BUTTON
+# SAVE
 # =========================================================
 
 st.divider()
@@ -750,55 +942,16 @@ st.divider()
 if st.button(
     "💾 Lưu & Đồng bộ Google Sheets",
     type="primary",
-    key=f"save_{selected_year}_{selected_week}",
 ):
 
-    clean_df = edited_df.copy()
-
-
-    # Chỉ giữ dòng có tên công việc
-    clean_df = clean_df[
-        clean_df["Tên công việc"]
+    clean_df = edited_df[
+        edited_df[
+            "Tên công việc"
+        ]
         .astype(str)
         .str.strip()
         != ""
     ].copy()
-
-
-    # Đảm bảo đủ cột
-    for column in COLUMNS:
-
-        if column not in clean_df.columns:
-
-            if column == "Trạng thái":
-                clean_df[column] = False
-
-            elif column == "Deadline":
-                clean_df[column] = pd.NaT
-
-            else:
-                clean_df[column] = ""
-
-
-    clean_df = clean_df[
-        COLUMNS
-    ].copy()
-
-
-    # Chuẩn hóa deadline
-    clean_df["Deadline"] = pd.to_datetime(
-        clean_df["Deadline"],
-        errors="coerce",
-        dayfirst=True,
-    )
-
-
-    # Chuẩn hóa trạng thái
-    clean_df["Trạng thái"] = (
-        clean_df["Trạng thái"]
-        .fillna(False)
-        .astype(bool)
-    )
 
 
     with st.spinner(
@@ -815,33 +968,31 @@ if st.button(
 
     if success:
 
+        # Reload từ database để nhận:
+        # - Task ID mới
+        # - Ngày hoàn thành mới
+        # - trạng thái carryover mới
         st.session_state[
             week_key
-        ] = clean_df.reset_index(
-            drop=True
+        ] = load_weekly_sheet(
+            selected_year,
+            selected_week,
         )
 
 
-        # Xóa preview AI cũ nếu còn
-        if ai_key in st.session_state:
+        if (
+            editor_key
+            in st.session_state
+        ):
 
             del st.session_state[
-                ai_key
-            ]
-
-
-        if ai_source_key in st.session_state:
-
-            del st.session_state[
-                ai_source_key
+                editor_key
             ]
 
 
         st.success(
-            f"Đã lưu tiến độ Tuần "
-            f"{selected_week} "
-            f"({time_range_str}) "
-            f"vào Google Sheets thành công!"
+            "Đã lưu và đồng bộ "
+            "Google Sheets thành công!"
         )
 
 
@@ -849,148 +1000,86 @@ if st.button(
 
 
 # =========================================================
-# PENDING TASK REPORT
+# PENDING REPORT
 # =========================================================
 
 st.divider()
 
+st.subheader(
+    "Công việc chưa hoàn thành"
+)
 
-if not edited_df.empty:
 
-    report_df = edited_df[
-        edited_df["Tên công việc"]
-        .astype(str)
-        .str.strip()
-        != ""
-    ].copy()
+pending_df = valid_df[
+    ~valid_df[
+        "Trạng thái"
+    ]
+    .fillna(False)
+    .astype(bool)
+].copy()
+
+
+if pending_df.empty:
+
+    st.info(
+        "Không còn công việc "
+        "chưa hoàn thành."
+    )
 
 else:
 
-    report_df = pd.DataFrame(
-        columns=COLUMNS
-    )
+    for _, row in pending_df.iterrows():
 
-
-if not report_df.empty:
-
-    report_df["Trạng thái"] = (
-        report_df["Trạng thái"]
-        .fillna(False)
-        .astype(bool)
-    )
-
-
-    pending_df = report_df[
-        ~report_df[
-            "Trạng thái"
-        ]
-    ]
-
-
-    st.subheader(
-        "Báo cáo danh sách chưa đạt"
-    )
-
-
-    if not pending_df.empty:
-
-        st.write(
-            "Các công việc chưa hoàn thành trong tuần:"
-        )
-
-
-        for _, row in pending_df.iterrows():
-
-            task_name = str(
-                row.get(
-                    "Tên công việc",
-                    "",
-                )
-            ).strip()
-
-
-            priority = str(
-                row.get(
-                    "Mức độ ưu tiên",
-                    "",
-                )
-            ).strip()
-
-
-            note = row.get(
-                "Ghi chú",
+        task = str(
+            row.get(
+                "Tên công việc",
                 "",
             )
-
-
-            if pd.isna(note):
-                note = ""
-
-            else:
-                note = str(
-                    note
-                ).strip()
-
-
-            deadline_value = row.get(
-                "Deadline",
-                pd.NaT,
-            )
-
-
-            deadline_str = ""
-
-
-            if pd.notna(
-                deadline_value
-            ):
-
-                deadline_value = pd.to_datetime(
-                    deadline_value,
-                    errors="coerce",
-                )
-
-
-                if pd.notna(
-                    deadline_value
-                ):
-
-                    deadline_str = (
-                        " | Deadline: "
-                        + deadline_value.strftime(
-                            "%d/%m/%Y %H:%M"
-                        )
-                    )
-
-
-            note_str = ""
-
-
-            if note:
-
-                note_str = (
-                    f" | Ghi chú: {note}"
-                )
-
-
-            st.write(
-                f"- **{task_name}** "
-                f"(Mức độ: "
-                f"{priority}"
-                f"{deadline_str}"
-                f"{note_str})"
-            )
-
-
-    else:
-
-        st.info(
-            "Tất cả công việc trong tuần đã hoàn thành!"
         )
 
 
-elif total_tasks == 0:
+        priority = str(
+            row.get(
+                "Mức độ ưu tiên",
+                "",
+            )
+        )
 
-    st.info(
-        "Chưa có công việc nào trong tuần này."
-    )
+
+        source = str(
+            row.get(
+                "Nguồn",
+                "",
+            )
+        )
+
+
+        deadline = row.get(
+            "Deadline",
+            pd.NaT,
+        )
+
+
+        deadline_text = ""
+
+
+        if pd.notna(
+            deadline
+        ):
+
+            deadline_text = (
+                " | Deadline: "
+                + pd.to_datetime(
+                    deadline
+                ).strftime(
+                    "%d/%m/%Y %H:%M"
+                )
+            )
+
+
+        st.write(
+            f"- **{task}** "
+            f"| {priority} "
+            f"| {source}"
+            f"{deadline_text}"
+        )
