@@ -454,15 +454,11 @@ if st.session_state.pop(
 # DATA EDITOR
 # =========================================================
 
-edited_df = st.data_editor(
+edited_df = sedited_df = st.data_editor(
     display_df,
-
     num_rows="dynamic",
-
-    use_container_width=True,
-
+    width="stretch",
     column_config=column_config,
-
     column_order=[
         "Tên công việc",
         "Mức độ ưu tiên",
@@ -470,7 +466,6 @@ edited_df = st.data_editor(
         "Ghi chú",
         "Trạng thái",
     ],
-
     key=editor_key,
 )
 
@@ -909,9 +904,9 @@ if (
 
 
     st.dataframe(
-        preview_df,
-        use_container_width=True,
-        hide_index=True,
+    preview_df,
+    width="stretch",
+    hide_index=True,
     )
 
 
