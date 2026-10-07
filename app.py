@@ -9,7 +9,7 @@ from sheets_db import (
     save_weekly_sheet,
 )
 
-from ai_scheduler import suggest_task_order
+from task_scheduler import suggest_task_order
 
 
 # =========================================================
@@ -408,9 +408,7 @@ edited_df = st.data_editor(
 
 st.divider()
 
-st.subheader(
-    "AI hỗ trợ sắp xếp công việc"
-)
+st.subheader("Gợi ý sắp xếp công việc")
 
 st.caption(
     "AI phân tích trực tiếp các công việc đang có trong bảng, "
@@ -437,7 +435,7 @@ tasks_for_ai = tasks_for_ai.reset_index(
 
 
 if st.button(
-    "🤖 AI gợi ý thứ tự công việc",
+    "Gợi ý thứ tự công việc",
     key=f"btn_ai_{selected_year}_{selected_week}",
 ):
 
