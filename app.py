@@ -11,7 +11,7 @@ from sheets_db import (
 
 
 # =========================================================
-# CẤU HÌNH TRANG
+# PAGE CONFIG
 # =========================================================
 
 st.set_page_config(
@@ -24,7 +24,7 @@ st.title("Quản Lý Công Việc Theo Tuần")
 
 
 # =========================================================
-# LẤY TUẦN HIỆN TẠI
+# CURRENT WEEK
 # =========================================================
 
 today = datetime.date.today()
@@ -32,12 +32,12 @@ current_year, current_week, _ = today.isocalendar()
 
 
 # =========================================================
-# CHỌN NĂM / TUẦN
+# SELECT YEAR / WEEK
 # =========================================================
 
-col_select1, col_select2 = st.columns(2)
+col1, col2 = st.columns(2)
 
-with col_select1:
+with col1:
     selected_year = st.number_input(
         "Năm",
         min_value=2024,
@@ -46,7 +46,7 @@ with col_select1:
         step=1,
     )
 
-with col_select2:
+with col2:
     selected_week = st.number_input(
         "Tuần thứ",
         min_value=1,
@@ -61,7 +61,7 @@ selected_week = int(selected_week)
 
 
 # =========================================================
-# XÁC ĐỊNH KHOẢNG THỜI GIAN CỦA TUẦN
+# DATE RANGE
 # =========================================================
 
 try:
@@ -96,74 +96,55 @@ st.subheader(
 
 
 # =========================================================
-# SESSION STATE CHO TỪNG TUẦN
+# SESSION STATE
 # =========================================================
 
 week_key = f"df_simple_{selected_year}_{selected_week}"
 
 
 if week_key not in st.session_state:
-
-    df_loaded = load_weekly_sheet(
+    st.session_state[week_key] = load_weekly_sheet(
         selected_year,
         selected_week,
     )
-
-    st.session_state[week_key] = df_loaded
 
 
 df = st.session_state[week_key]
 
 
-# =========================================================
-# ĐẢM BẢO DATAFRAME CÓ ĐÚNG CỘT
-# =========================================================
-
-if df is None or not isinstance(df, pd.DataFrame):
+if not isinstance(df, pd.DataFrame):
     df = pd.DataFrame(columns=COLUMNS)
+
 
 for column in COLUMNS:
     if column not in df.columns:
-        if column == "Trạng thái":
-            df[column] = False
-        else:
-            df[column] = ""
+        df[column] = False if column == "Trạng thái" else ""
+
 
 df = df[COLUMNS].copy()
 
 
 # =========================================================
-# THỐNG KÊ
+# METRICS
 # =========================================================
 
 if not df.empty:
-
-    valid_tasks = (
+    valid_mask = (
         df["Tên công việc"]
         .astype(str)
         .str.strip()
         != ""
     )
 
-    total_tasks = int(valid_tasks.sum())
+    total_tasks = int(valid_mask.sum())
 
 else:
     total_tasks = 0
 
 
-if (
-    total_tasks > 0
-    and "Trạng thái" in df.columns
-):
-
+if total_tasks > 0:
     completed_tasks = int(
-        df.loc[
-            df["Tên công việc"]
-            .astype(str)
-            .str.strip()
-            != "",
-            "Trạng thái",
-        ]
+        df.loc[valid_mask, "Trạng thái"]
         .fillna(False)
         .astype(bool)
         .sum()
@@ -183,19 +164,19 @@ overall_percent = (
 )
 
 
-col1, col2, col3 = st.columns(3)
+metric1, metric2, metric3 = st.columns(3)
 
-col1.metric(
+metric1.metric(
     "Tổng công việc",
     total_tasks,
 )
 
-col2.metric(
+metric2.metric(
     "Đã hoàn thành",
     f"{completed_tasks} ({overall_percent:.1f}%)",
 )
 
-col3.metric(
+metric3.metric(
     "Chưa hoàn thành",
     pending_tasks,
 )
@@ -211,42 +192,37 @@ st.divider()
 
 
 # =========================================================
-# CẤU HÌNH BẢNG
+# TABLE CONFIG
 # =========================================================
 
 column_config = {
+    "Tên công việc": st.column_config.TextColumn(
+        "Công việc",
+        required=True,
+        width="large",
+    ),
 
-    "Tên công việc":
-        st.column_config.TextColumn(
-            "Công việc",
-            required=True,
-            width="large",
-        ),
+    "Mức độ ưu tiên": st.column_config.SelectboxColumn(
+        "Mức độ ưu tiên",
+        options=[
+            "Cao",
+            "Trung bình",
+            "Thấp",
+        ],
+        default="Trung bình",
+        width="medium",
+    ),
 
-    "Mức độ ưu tiên":
-        st.column_config.SelectboxColumn(
-            "Mức độ ưu tiên",
-            options=[
-                "Cao",
-                "Trung bình",
-                "Thấp",
-            ],
-            default="Trung bình",
-            width="medium",
-        ),
+    "Deadline": st.column_config.TextColumn(
+        "Deadline (nếu có)",
+        width="medium",
+    ),
 
-    "Deadline":
-        st.column_config.TextColumn(
-            "Deadline (nếu có)",
-            width="medium",
-        ),
-
-    "Trạng thái":
-        st.column_config.CheckboxColumn(
-            "Trạng thái",
-            default=False,
-            width="small",
-        ),
+    "Trạng thái": st.column_config.CheckboxColumn(
+        "Trạng thái",
+        default=False,
+        width="small",
+    ),
 }
 
 
@@ -264,7 +240,7 @@ edited_df = st.data_editor(
 
 
 # =========================================================
-# NÚT LƯU
+# SAVE BUTTON
 # =========================================================
 
 if st.button(
@@ -274,7 +250,6 @@ if st.button(
 
     clean_df = edited_df.copy()
 
-    # Chỉ giữ những dòng có tên công việc
     clean_df = clean_df[
         clean_df["Tên công việc"]
         .astype(str)
@@ -282,25 +257,23 @@ if st.button(
         != ""
     ].copy()
 
-    # Đảm bảo đủ cột
+
     for column in COLUMNS:
-
         if column not in clean_df.columns:
+            clean_df[column] = (
+                False if column == "Trạng thái" else ""
+            )
 
-            if column == "Trạng thái":
-                clean_df[column] = False
-
-            else:
-                clean_df[column] = ""
 
     clean_df = clean_df[COLUMNS]
 
-    # Chuyển trạng thái về boolean
+
     clean_df["Trạng thái"] = (
         clean_df["Trạng thái"]
         .fillna(False)
         .astype(bool)
     )
+
 
     with st.spinner(
         "Đang đồng bộ với Google Sheets..."
@@ -313,7 +286,7 @@ if st.button(
             clean_df,
         )
 
-    # Chỉ báo thành công nếu Google thực sự lưu được
+
     if success:
 
         st.session_state[week_key] = clean_df
@@ -329,14 +302,15 @@ if st.button(
 
 
 # =========================================================
-# BÁO CÁO CÔNG VIỆC CHƯA HOÀN THÀNH
+# PENDING TASK REPORT
 # =========================================================
 
 st.divider()
 
+
 if not edited_df.empty:
 
-    clean_report_df = edited_df[
+    report_df = edited_df[
         edited_df["Tên công việc"]
         .astype(str)
         .str.strip()
@@ -344,21 +318,22 @@ if not edited_df.empty:
     ].copy()
 
 else:
-    clean_report_df = pd.DataFrame(
+    report_df = pd.DataFrame(
         columns=COLUMNS
     )
 
 
-if not clean_report_df.empty:
+if not report_df.empty:
 
-    clean_report_df["Trạng thái"] = (
-        clean_report_df["Trạng thái"]
+    report_df["Trạng thái"] = (
+        report_df["Trạng thái"]
         .fillna(False)
         .astype(bool)
     )
 
-    pending_df = clean_report_df[
-        ~clean_report_df["Trạng thái"]
+
+    pending_df = report_df[
+        ~report_df["Trạng thái"]
     ]
 
 
@@ -373,33 +348,28 @@ if not clean_report_df.empty:
             "Các công việc chưa hoàn thành trong tuần:"
         )
 
+
         for _, row in pending_df.iterrows():
 
             task_name = str(
-                row.get(
-                    "Tên công việc",
-                    "",
-                )
+                row.get("Tên công việc", "")
             ).strip()
 
             priority = str(
-                row.get(
-                    "Mức độ ưu tiên",
-                    "",
-                )
+                row.get("Mức độ ưu tiên", "")
             ).strip()
 
             deadline = str(
-                row.get(
-                    "Deadline",
-                    "",
-                )
+                row.get("Deadline", "")
             ).strip()
 
 
             deadline_str = ""
 
-            if deadline and deadline.lower() != "nan":
+            if (
+                deadline
+                and deadline.lower() != "nan"
+            ):
 
                 deadline_str = (
                     f" | Deadline: {deadline}"
@@ -416,6 +386,5 @@ if not clean_report_df.empty:
     else:
 
         st.info(
-            "Tất cả công việc trong tuần "
-            "đã hoàn thành!"
+            "Tất cả công việc trong tuần đã hoàn thành!"
         )
