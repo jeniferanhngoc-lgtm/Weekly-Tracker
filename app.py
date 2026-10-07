@@ -92,7 +92,6 @@ try:
         )
     )
 
-
     last_day_of_week = (
         datetime.date.fromisocalendar(
             selected_year,
@@ -100,7 +99,6 @@ try:
             7,
         )
     )
-
 
 except ValueError:
 
@@ -219,30 +217,29 @@ for column in required_columns:
     if column not in df.columns:
 
         if column == "Trạng thái":
+
             df[column] = False
 
         elif column in [
             "Deadline",
             "Ngày hoàn thành",
         ]:
+
             df[column] = pd.NaT
 
         else:
+
             df[column] = ""
 
 
-df[
-    "Deadline"
-] = pd.to_datetime(
+df["Deadline"] = pd.to_datetime(
     df["Deadline"],
     errors="coerce",
     dayfirst=True,
 )
 
 
-df[
-    "Ngày hoàn thành"
-] = pd.to_datetime(
+df["Ngày hoàn thành"] = pd.to_datetime(
     df["Ngày hoàn thành"],
     errors="coerce",
     dayfirst=True,
@@ -288,9 +285,7 @@ priority_low = {
 
 if sort_option == "Cao → Thấp":
 
-    display_df[
-        "_priority"
-    ] = (
+    display_df["_priority"] = (
         display_df[
             "Mức độ ưu tiên"
         ]
@@ -300,9 +295,9 @@ if sort_option == "Cao → Thấp":
         .fillna(99)
     )
 
-
     display_df = (
-        display_df.sort_values(
+        display_df
+        .sort_values(
             "_priority",
             kind="stable",
         )
@@ -319,9 +314,7 @@ if sort_option == "Cao → Thấp":
 
 elif sort_option == "Thấp → Cao":
 
-    display_df[
-        "_priority"
-    ] = (
+    display_df["_priority"] = (
         display_df[
             "Mức độ ưu tiên"
         ]
@@ -331,9 +324,9 @@ elif sort_option == "Thấp → Cao":
         .fillna(99)
     )
 
-
     display_df = (
-        display_df.sort_values(
+        display_df
+        .sort_values(
             "_priority",
             kind="stable",
         )
@@ -376,9 +369,7 @@ column_config = {
     "Deadline":
         st.column_config.DatetimeColumn(
             "Deadline",
-            format=(
-                "DD/MM/YYYY HH:mm"
-            ),
+            format="DD/MM/YYYY HH:mm",
             step=900,
             width="medium",
         ),
@@ -409,19 +400,16 @@ edited_df = st.data_editor(
 
     use_container_width=True,
 
-    column_config=(
-        column_config
-    ),
+    column_config=column_config,
 
     column_order=[
-    "Tên công việc",
-    "Mức độ ưu tiên",
-    "Deadline",
-    "Ghi chú",
-    "Trạng thái",
+        "Tên công việc",
+        "Mức độ ưu tiên",
+        "Deadline",
+        "Ghi chú",
+        "Trạng thái",
     ],
 
-   
     key=editor_key,
 )
 
@@ -515,7 +503,7 @@ for _, row in this_week_df.iterrows():
     )
 
 
-    # Nếu task vừa tick trong editor nhưng chưa save,
+    # Nếu vừa tick trong editor và chưa save,
     # coi như hoàn thành trong tuần hiện tại
     # nếu đang xem chính tuần hiện tại.
     if (
@@ -528,11 +516,9 @@ for _, row in this_week_df.iterrows():
         and
         pd.isna(completion)
         and
-        selected_year
-        == current_year
+        selected_year == current_year
         and
-        selected_week
-        == current_week
+        selected_week == current_week
     ):
 
         completion = pd.Timestamp.now()
@@ -697,16 +683,13 @@ if st.button(
             )
         )
 
-
         st.session_state[
             suggest_key
         ] = result
 
-
         st.session_state[
             suggest_source_key
         ] = tasks_for_sort.copy()
-
 
         st.rerun()
 
@@ -729,13 +712,11 @@ if (
         ]
     )
 
-
     source_df = (
         st.session_state[
             suggest_source_key
         ].copy()
     )
-
 
     preview = []
 
@@ -1052,7 +1033,7 @@ else:
             )
 
 
-           st.write(
+        st.write(
             f"- **{task}** "
             f"| {priority}"
             f"{deadline_text}"
