@@ -4,7 +4,7 @@ import streamlit as st
 
 
 # =========================================================
-# CẤU HÌNH
+# CONFIG
 # =========================================================
 
 COLUMNS = [
@@ -26,13 +26,30 @@ WORKSHEET_NAME = "Simple_Weekly_Tasks"
 
 
 # =========================================================
-# KẾT NỐI GOOGLE SHEETS
+# GOOGLE SHEETS CONNECTION
 # =========================================================
+
+def get_google_client():
+    """
+    Tạo Google Sheets client từ Streamlit Secrets.
+    """
+
+    service_account_info = dict(
+        st.secrets["gcp_service_account"]
+    )
+
+    return gspread.service_account_from_dict(
+        service_account_info
+    )
+
 
 def get_spreadsheet():
     """
-    Đăng nhập bằng Google Service Account
-    và mở Spreadsheet theo ID.
+    Kết nối Spreadsheet.
+
+    Kiểm tra metadata trực tiếp trước để giữ nguyên
+    lỗi Google API thay vì để open_by_key() đổi thành
+    PermissionError không có thông tin.
     """
 
     spreadsheet_id = str(
@@ -43,29 +60,60 @@ def get_spreadsheet():
         st.secrets["gcp_service_account"]
     )
 
-    gc = gspread.service_account_from_dict(
-        service_account_info
-    )
+    gc = get_google_client()
 
-    return gc.open_by_key(
-        spreadsheet_id
-    )
+
+    try:
+
+        # Test Google Sheets API + permission
+        gc.http_client.fetch_sheet_metadata(
+            spreadsheet_id
+        )
+
+        return gc.open_by_key(
+            spreadsheet_id
+        )
+
+
+    except gspread.exceptions.APIError as e:
+
+        st.error(
+            "Google Sheets API từ chối kết nối."
+        )
+
+        st.code(
+            f"""Service account:
+{service_account_info.get("client_email")}
+
+Project ID:
+{service_account_info.get("project_id")}
+
+Spreadsheet ID:
+{spreadsheet_id}
+
+Lỗi Google API:
+{repr(e)}
+"""
+        )
+
+        raise
 
 
 # =========================================================
-# LẤY / TẠO WORKSHEET
+# WORKSHEET
 # =========================================================
 
-def get_or_create_worksheet(spreadsheet):
+def get_or_create_worksheet(
+    spreadsheet,
+):
     """
     Lấy worksheet Simple_Weekly_Tasks.
-
-    Nếu chưa tồn tại thì tự động tạo.
+    Nếu chưa tồn tại thì tạo mới.
     """
 
     try:
 
-        worksheet = spreadsheet.worksheet(
+        return spreadsheet.worksheet(
             WORKSHEET_NAME
         )
 
@@ -81,72 +129,80 @@ def get_or_create_worksheet(spreadsheet):
             SHEET_HEADERS
         )
 
-    return worksheet
+        return worksheet
 
 
 # =========================================================
-# CHUẨN HÓA TRẠNG THÁI
+# STATUS NORMALIZATION
 # =========================================================
 
 def parse_status(value):
     """
-    Chuyển dữ liệu từ Google Sheets
-    về True / False.
+    Chuyển trạng thái từ Google Sheets về boolean.
     """
 
     if isinstance(value, bool):
         return value
 
-    value = str(value).strip().lower()
 
-    return value in [
+    normalized = (
+        str(value)
+        .strip()
+        .lower()
+    )
+
+
+    return normalized in [
         "true",
         "1",
         "x",
         "yes",
         "done",
         "hoàn thành",
-        "da hoan thanh",
         "đã hoàn thành",
     ]
 
 
 # =========================================================
-# CHUẨN HÓA DATAFRAME
+# DATAFRAME NORMALIZATION
 # =========================================================
 
 def normalize_dataframe(df):
     """
-    Đảm bảo DataFrame luôn có đúng cấu trúc.
+    Chuẩn hóa DataFrame theo cấu trúc ứng dụng.
     """
 
     if df is None:
+
         return pd.DataFrame(
             columns=COLUMNS
         )
 
+
     df = df.copy()
 
-    # Hỗ trợ dữ liệu phiên bản cũ
+
     if (
         "Trạng thái" not in df.columns
-        and "Đã xong" in df.columns
+        and
+        "Đã xong" in df.columns
     ):
 
-        df["Trạng thái"] = df[
-            "Đã xong"
-        ].apply(parse_status)
+        df["Trạng thái"] = (
+            df["Đã xong"]
+            .apply(parse_status)
+        )
 
 
     for column in COLUMNS:
 
         if column not in df.columns:
 
-            if column == "Trạng thái":
-                df[column] = False
-
-            else:
-                df[column] = ""
+            df[column] = (
+                False
+                if column == "Trạng thái"
+                else ""
+            )
 
 
     df["Trạng thái"] = (
@@ -159,7 +215,7 @@ def normalize_dataframe(df):
 
 
 # =========================================================
-# LOAD DỮ LIỆU TUẦN
+# LOAD WEEK
 # =========================================================
 
 def load_weekly_sheet(
@@ -167,15 +223,10 @@ def load_weekly_sheet(
     week: int,
 ):
     """
-    Tải danh sách công việc của
-    năm / tuần được chọn.
+    Tải dữ liệu theo năm và tuần.
     """
 
     try:
-
-        # ---------------------------------------------
-        # Kết nối Spreadsheet
-        # ---------------------------------------------
 
         spreadsheet = get_spreadsheet()
 
@@ -183,10 +234,6 @@ def load_weekly_sheet(
             spreadsheet
         )
 
-
-        # ---------------------------------------------
-        # Đọc dữ liệu
-        # ---------------------------------------------
 
         data = worksheet.get_all_records()
 
@@ -198,12 +245,10 @@ def load_weekly_sheet(
             )
 
 
-        df_all = pd.DataFrame(data)
+        df_all = pd.DataFrame(
+            data
+        )
 
-
-        # ---------------------------------------------
-        # Kiểm tra cấu trúc
-        # ---------------------------------------------
 
         if "Năm" not in df_all.columns:
 
@@ -227,10 +272,6 @@ def load_weekly_sheet(
             )
 
 
-        # ---------------------------------------------
-        # Ép kiểu
-        # ---------------------------------------------
-
         df_all["Năm"] = pd.to_numeric(
             df_all["Năm"],
             errors="coerce",
@@ -242,10 +283,6 @@ def load_weekly_sheet(
             errors="coerce",
         )
 
-
-        # ---------------------------------------------
-        # Lọc theo tuần
-        # ---------------------------------------------
 
         df_filtered = df_all[
             (
@@ -265,147 +302,28 @@ def load_weekly_sheet(
             )
 
 
-        # ---------------------------------------------
-        # Hỗ trợ cột phiên bản cũ
-        # ---------------------------------------------
-
-        if (
-            "Trạng thái"
-            not in df_filtered.columns
-            and
-            "Đã xong"
-            in df_filtered.columns
-        ):
-
-            df_filtered[
-                "Trạng thái"
-            ] = df_filtered[
-                "Đã xong"
-            ]
-
-
-        # ---------------------------------------------
-        # Chuẩn hóa
-        # ---------------------------------------------
-
         return normalize_dataframe(
             df_filtered
         )
 
 
-    # =====================================================
-    # LỖI KHÔNG CÓ QUYỀN
-    # =====================================================
-
-    except PermissionError:
-
-        service_email = str(
-            st.secrets[
-                "gcp_service_account"
-            ][
-                "client_email"
-            ]
-        )
-
-
-        spreadsheet_id = str(
-            st.secrets[
-                "spreadsheet_id"
-            ]
-        )
-
-
-        st.error(
-            "Google trả về lỗi 403 Permission Denied."
-        )
-
-
-        st.warning(
-            "Google Service Account đăng nhập được, "
-            "nhưng không mở được Spreadsheet."
-        )
-
-
-        st.code(
-            f"""Service account đang dùng:
-{service_email}
-
-Spreadsheet ID đang dùng:
-{spreadsheet_id}"""
-        )
-
-
-        st.info(
-            "Hãy kiểm tra Google Sheet đã được "
-            "Share cho đúng service account phía trên "
-            "với quyền Editor hay chưa."
-        )
-
+    except gspread.exceptions.APIError:
 
         return pd.DataFrame(
             columns=COLUMNS
         )
 
-
-    # =====================================================
-    # KHÔNG TÌM THẤY SPREADSHEET
-    # =====================================================
-
-    except gspread.exceptions.SpreadsheetNotFound:
-
-        st.error(
-            "Không tìm thấy Google Spreadsheet."
-        )
-
-
-        st.code(
-            f'Spreadsheet ID: '
-            f'{st.secrets["spreadsheet_id"]}'
-        )
-
-
-        return pd.DataFrame(
-            columns=COLUMNS
-        )
-
-
-    # =====================================================
-    # LỖI API
-    # =====================================================
-
-    except gspread.exceptions.APIError as e:
-
-        st.error(
-            "Google Sheets API trả về lỗi."
-        )
-
-
-        st.code(
-            repr(e)
-        )
-
-
-        return pd.DataFrame(
-            columns=COLUMNS
-        )
-
-
-    # =====================================================
-    # LỖI KHÁC
-    # =====================================================
 
     except Exception as e:
 
         st.error(
-            f"Lỗi kết nối Google Sheets: "
+            f"Lỗi khi tải Google Sheets: "
             f"{type(e).__name__}"
         )
-
 
         st.code(
             repr(e)
         )
-
 
         return pd.DataFrame(
             columns=COLUMNS
@@ -413,7 +331,7 @@ Spreadsheet ID đang dùng:
 
 
 # =========================================================
-# LƯU DỮ LIỆU TUẦN
+# SAVE WEEK
 # =========================================================
 
 def save_weekly_sheet(
@@ -423,18 +341,14 @@ def save_weekly_sheet(
     df_current: pd.DataFrame,
 ):
     """
-    Lưu / cập nhật dữ liệu tuần lên Google Sheets.
+    Lưu dữ liệu tuần vào Google Sheets.
 
-    Trả về:
-        True  -> lưu thành công
-        False -> lưu thất bại
+    Return:
+        True  -> thành công
+        False -> thất bại
     """
 
     try:
-
-        # ---------------------------------------------
-        # Kết nối
-        # ---------------------------------------------
 
         spreadsheet = get_spreadsheet()
 
@@ -443,21 +357,15 @@ def save_weekly_sheet(
         )
 
 
-        # ---------------------------------------------
-        # Đọc toàn bộ dữ liệu cũ
-        # ---------------------------------------------
-
         data = worksheet.get_all_records()
 
 
         if data:
 
-            df_all = pd.DataFrame(data)
+            df_all = pd.DataFrame(
+                data
+            )
 
-
-            # -----------------------------------------
-            # Chuẩn hóa năm / tuần
-            # -----------------------------------------
 
             if "Năm" in df_all.columns:
 
@@ -483,10 +391,6 @@ def save_weekly_sheet(
                 df_all["Tuần"] = ""
 
 
-            # -----------------------------------------
-            # Xóa dữ liệu cũ của tuần hiện tại
-            # -----------------------------------------
-
             df_other = df_all[
                 ~(
                     (
@@ -502,16 +406,15 @@ def save_weekly_sheet(
             ].copy()
 
 
-            # Chuẩn hóa dữ liệu cũ
             for column in SHEET_HEADERS:
 
                 if column not in df_other.columns:
 
-                    if column == "Trạng thái":
-                        df_other[column] = False
-
-                    else:
-                        df_other[column] = ""
+                    df_other[column] = (
+                        False
+                        if column == "Trạng thái"
+                        else ""
+                    )
 
 
             df_other = df_other[
@@ -527,7 +430,7 @@ def save_weekly_sheet(
 
 
         # ---------------------------------------------
-        # Chuẩn bị dữ liệu tuần hiện tại
+        # CURRENT WEEK DATA
         # ---------------------------------------------
 
         df_save = normalize_dataframe(
@@ -557,7 +460,7 @@ def save_weekly_sheet(
 
 
         # ---------------------------------------------
-        # Ghép dữ liệu
+        # MERGE
         # ---------------------------------------------
 
         df_final = pd.concat(
@@ -574,16 +477,11 @@ def save_weekly_sheet(
         ]
 
 
-        # ---------------------------------------------
-        # Làm sạch NaN
-        # ---------------------------------------------
-
         df_final = df_final.fillna("")
 
 
         # ---------------------------------------------
-        # Chuyển numpy type thành Python type
-        # để JSON của Google không giận dữ
+        # CONVERT TO PLAIN PYTHON TYPES
         # ---------------------------------------------
 
         rows = []
@@ -596,35 +494,37 @@ def save_weekly_sheet(
 
             clean_row = []
 
+
             for value in row:
 
-                # Boolean
                 if isinstance(
                     value,
-                    (bool,),
+                    bool,
                 ):
 
                     clean_row.append(
                         bool(value)
                     )
 
-                # Number
                 elif hasattr(
                     value,
                     "item",
                 ):
 
                     try:
+
                         clean_row.append(
                             value.item()
                         )
 
                     except Exception:
+
                         clean_row.append(
                             value
                         )
 
                 else:
+
                     clean_row.append(
                         value
                     )
@@ -636,7 +536,7 @@ def save_weekly_sheet(
 
 
         # ---------------------------------------------
-        # Ghi lại Sheet
+        # WRITE
         # ---------------------------------------------
 
         worksheet.clear()
@@ -656,94 +556,10 @@ def save_weekly_sheet(
         return True
 
 
-    # =====================================================
-    # LỖI QUYỀN
-    # =====================================================
-
-    except PermissionError:
-
-        service_email = str(
-            st.secrets[
-                "gcp_service_account"
-            ][
-                "client_email"
-            ]
-        )
-
-
-        spreadsheet_id = str(
-            st.secrets[
-                "spreadsheet_id"
-            ]
-        )
-
-
-        st.error(
-            "Không có quyền truy cập Google Sheet."
-        )
-
-
-        st.code(
-            f"""Service account:
-{service_email}
-
-Spreadsheet ID:
-{spreadsheet_id}"""
-        )
-
-
-        st.info(
-            "Hãy Share đúng Google Sheet cho "
-            "service account phía trên "
-            "với quyền Editor."
-        )
-
+    except gspread.exceptions.APIError:
 
         return False
 
-
-    # =====================================================
-    # KHÔNG TÌM THẤY SPREADSHEET
-    # =====================================================
-
-    except gspread.exceptions.SpreadsheetNotFound:
-
-        st.error(
-            "Không tìm thấy Google Spreadsheet."
-        )
-
-
-        st.code(
-            f'Spreadsheet ID: '
-            f'{st.secrets["spreadsheet_id"]}'
-        )
-
-
-        return False
-
-
-    # =====================================================
-    # API ERROR
-    # =====================================================
-
-    except gspread.exceptions.APIError as e:
-
-        st.error(
-            "Google Sheets API trả về lỗi."
-        )
-
-
-        st.code(
-            repr(e)
-        )
-
-
-        return False
-
-
-    # =====================================================
-    # LỖI KHÁC
-    # =====================================================
 
     except Exception as e:
 
@@ -752,10 +568,8 @@ Spreadsheet ID:
             f"{type(e).__name__}"
         )
 
-
         st.code(
             repr(e)
         )
-
 
         return False
