@@ -11,6 +11,7 @@ COLUMNS = [
     "Tên công việc",
     "Mức độ ưu tiên",
     "Deadline",
+    "Ghi chú",
     "Trạng thái",
 ]
 
@@ -26,16 +27,15 @@ WORKSHEET_NAME = "Simple_Weekly_Tasks"
 
 
 # =========================================================
-# GOOGLE SHEETS CONNECTION
+# GOOGLE CLIENT
 # =========================================================
 
 def get_google_client():
-    """
-    Tạo Google Sheets client từ Streamlit Secrets.
-    """
 
     service_account_info = dict(
-        st.secrets["gcp_service_account"]
+        st.secrets[
+            "gcp_service_account"
+        ]
     )
 
     return gspread.service_account_from_dict(
@@ -43,32 +43,35 @@ def get_google_client():
     )
 
 
-def get_spreadsheet():
-    """
-    Kết nối Spreadsheet.
+# =========================================================
+# SPREADSHEET
+# =========================================================
 
-    Kiểm tra metadata trực tiếp trước để giữ nguyên
-    lỗi Google API thay vì để open_by_key() đổi thành
-    PermissionError không có thông tin.
-    """
+def get_spreadsheet():
 
     spreadsheet_id = str(
-        st.secrets["spreadsheet_id"]
+        st.secrets[
+            "spreadsheet_id"
+        ]
     ).strip()
 
+
     service_account_info = dict(
-        st.secrets["gcp_service_account"]
+        st.secrets[
+            "gcp_service_account"
+        ]
     )
+
 
     gc = get_google_client()
 
 
     try:
 
-        # Test Google Sheets API + permission
         gc.http_client.fetch_sheet_metadata(
             spreadsheet_id
         )
+
 
         return gc.open_by_key(
             spreadsheet_id
@@ -80,6 +83,7 @@ def get_spreadsheet():
         st.error(
             "Google Sheets API từ chối kết nối."
         )
+
 
         st.code(
             f"""Service account:
@@ -106,42 +110,45 @@ Lỗi Google API:
 def get_or_create_worksheet(
     spreadsheet,
 ):
-    """
-    Lấy worksheet Simple_Weekly_Tasks.
-    Nếu chưa tồn tại thì tạo mới.
-    """
 
     try:
 
-        return spreadsheet.worksheet(
-            WORKSHEET_NAME
+        worksheet = (
+            spreadsheet.worksheet(
+                WORKSHEET_NAME
+            )
         )
+
 
     except gspread.exceptions.WorksheetNotFound:
 
-        worksheet = spreadsheet.add_worksheet(
-            title=WORKSHEET_NAME,
-            rows=500,
-            cols=10,
+        worksheet = (
+            spreadsheet.add_worksheet(
+                title=WORKSHEET_NAME,
+                rows=500,
+                cols=12,
+            )
         )
+
 
         worksheet.append_row(
             SHEET_HEADERS
         )
 
-        return worksheet
+
+    return worksheet
 
 
 # =========================================================
-# STATUS NORMALIZATION
+# STATUS
 # =========================================================
 
 def parse_status(value):
-    """
-    Chuyển trạng thái từ Google Sheets về boolean.
-    """
 
-    if isinstance(value, bool):
+    if isinstance(
+        value,
+        bool,
+    ):
         return value
 
 
@@ -164,13 +171,48 @@ def parse_status(value):
 
 
 # =========================================================
-# DATAFRAME NORMALIZATION
+# DEADLINE
+# =========================================================
+
+def parse_deadline(value):
+    """
+    Chuyển deadline từ Google Sheets
+    về pandas datetime.
+    """
+
+    if value is None:
+        return pd.NaT
+
+
+    text = str(
+        value
+    ).strip()
+
+
+    if (
+        text == ""
+        or text.lower()
+        in [
+            "nan",
+            "nat",
+            "none",
+        ]
+    ):
+        return pd.NaT
+
+
+    return pd.to_datetime(
+        text,
+        errors="coerce",
+        dayfirst=True,
+    )
+
+
+# =========================================================
+# NORMALIZE DATAFRAME
 # =========================================================
 
 def normalize_dataframe(df):
-    """
-    Chuẩn hóa DataFrame theo cấu trúc ứng dụng.
-    """
 
     if df is None:
 
@@ -182,36 +224,66 @@ def normalize_dataframe(df):
     df = df.copy()
 
 
+    # Hỗ trợ dữ liệu cũ
     if (
-        "Trạng thái" not in df.columns
+        "Trạng thái"
+        not in df.columns
         and
-        "Đã xong" in df.columns
+        "Đã xong"
+        in df.columns
     ):
 
-        df["Trạng thái"] = (
-            df["Đã xong"]
-            .apply(parse_status)
-        )
+        df[
+            "Trạng thái"
+        ] = df[
+            "Đã xong"
+        ]
 
 
     for column in COLUMNS:
 
         if column not in df.columns:
 
-            df[column] = (
-                False
-                if column == "Trạng thái"
-                else ""
-            )
+            if column == "Trạng thái":
+
+                df[column] = False
+
+            elif column == "Deadline":
+
+                df[column] = pd.NaT
+
+            else:
+
+                df[column] = ""
 
 
-    df["Trạng thái"] = (
-        df["Trạng thái"]
-        .apply(parse_status)
+    df[
+        "Trạng thái"
+    ] = (
+        df[
+            "Trạng thái"
+        ]
+        .apply(
+            parse_status
+        )
     )
 
 
-    return df[COLUMNS]
+    df[
+        "Deadline"
+    ] = (
+        df[
+            "Deadline"
+        ]
+        .apply(
+            parse_deadline
+        )
+    )
+
+
+    return df[
+        COLUMNS
+    ]
 
 
 # =========================================================
@@ -222,20 +294,24 @@ def load_weekly_sheet(
     year: int,
     week: int,
 ):
-    """
-    Tải dữ liệu theo năm và tuần.
-    """
 
     try:
 
-        spreadsheet = get_spreadsheet()
-
-        worksheet = get_or_create_worksheet(
-            spreadsheet
+        spreadsheet = (
+            get_spreadsheet()
         )
 
 
-        data = worksheet.get_all_records()
+        worksheet = (
+            get_or_create_worksheet(
+                spreadsheet
+            )
+        )
+
+
+        data = (
+            worksheet.get_all_records()
+        )
 
 
         if not data:
@@ -272,25 +348,31 @@ def load_weekly_sheet(
             )
 
 
-        df_all["Năm"] = pd.to_numeric(
-            df_all["Năm"],
-            errors="coerce",
+        df_all["Năm"] = (
+            pd.to_numeric(
+                df_all["Năm"],
+                errors="coerce",
+            )
         )
 
 
-        df_all["Tuần"] = pd.to_numeric(
-            df_all["Tuần"],
-            errors="coerce",
+        df_all["Tuần"] = (
+            pd.to_numeric(
+                df_all["Tuần"],
+                errors="coerce",
+            )
         )
 
 
         df_filtered = df_all[
             (
-                df_all["Năm"] == year
+                df_all["Năm"]
+                == year
             )
             &
             (
-                df_all["Tuần"] == week
+                df_all["Tuần"]
+                == week
             )
         ].copy()
 
@@ -340,25 +422,29 @@ def save_weekly_sheet(
     time_range_str: str,
     df_current: pd.DataFrame,
 ):
-    """
-    Lưu dữ liệu tuần vào Google Sheets.
-
-    Return:
-        True  -> thành công
-        False -> thất bại
-    """
 
     try:
 
-        spreadsheet = get_spreadsheet()
-
-        worksheet = get_or_create_worksheet(
-            spreadsheet
+        spreadsheet = (
+            get_spreadsheet()
         )
 
 
-        data = worksheet.get_all_records()
+        worksheet = (
+            get_or_create_worksheet(
+                spreadsheet
+            )
+        )
 
+
+        data = (
+            worksheet.get_all_records()
+        )
+
+
+        # =================================================
+        # OLD DATA
+        # =================================================
 
         if data:
 
@@ -369,26 +455,34 @@ def save_weekly_sheet(
 
             if "Năm" in df_all.columns:
 
-                df_all["Năm"] = pd.to_numeric(
+                df_all[
+                    "Năm"
+                ] = pd.to_numeric(
                     df_all["Năm"],
                     errors="coerce",
                 )
 
             else:
 
-                df_all["Năm"] = ""
+                df_all[
+                    "Năm"
+                ] = ""
 
 
             if "Tuần" in df_all.columns:
 
-                df_all["Tuần"] = pd.to_numeric(
+                df_all[
+                    "Tuần"
+                ] = pd.to_numeric(
                     df_all["Tuần"],
                     errors="coerce",
                 )
 
             else:
 
-                df_all["Tuần"] = ""
+                df_all[
+                    "Tuần"
+                ] = ""
 
 
             df_other = df_all[
@@ -406,15 +500,22 @@ def save_weekly_sheet(
             ].copy()
 
 
+            # Đảm bảo dữ liệu cũ có Ghi chú
             for column in SHEET_HEADERS:
 
                 if column not in df_other.columns:
 
-                    df_other[column] = (
-                        False
-                        if column == "Trạng thái"
-                        else ""
-                    )
+                    if column == "Trạng thái":
+
+                        df_other[
+                            column
+                        ] = False
+
+                    else:
+
+                        df_other[
+                            column
+                        ] = ""
 
 
             df_other = df_other[
@@ -429,12 +530,31 @@ def save_weekly_sheet(
             )
 
 
-        # ---------------------------------------------
-        # CURRENT WEEK DATA
-        # ---------------------------------------------
+        # =================================================
+        # CURRENT WEEK
+        # =================================================
 
         df_save = normalize_dataframe(
             df_current
+        )
+
+
+        # Chuyển deadline thành text
+        # để lưu Google Sheets ổn định
+        df_save[
+            "Deadline"
+        ] = (
+            df_save[
+                "Deadline"
+            ]
+            .apply(
+                lambda x:
+                x.strftime(
+                    "%d/%m/%Y %H:%M"
+                )
+                if pd.notna(x)
+                else ""
+            )
         )
 
 
@@ -455,13 +575,15 @@ def save_weekly_sheet(
         df_save.insert(
             2,
             "Mốc thời gian",
-            str(time_range_str),
+            str(
+                time_range_str
+            ),
         )
 
 
-        # ---------------------------------------------
+        # =================================================
         # MERGE
-        # ---------------------------------------------
+        # =================================================
 
         df_final = pd.concat(
             [
@@ -477,12 +599,14 @@ def save_weekly_sheet(
         ]
 
 
-        df_final = df_final.fillna("")
+        df_final = (
+            df_final.fillna("")
+        )
 
 
-        # ---------------------------------------------
-        # CONVERT TO PLAIN PYTHON TYPES
-        # ---------------------------------------------
+        # =================================================
+        # CLEAN PYTHON TYPES
+        # =================================================
 
         rows = []
 
@@ -506,6 +630,19 @@ def save_weekly_sheet(
                         bool(value)
                     )
 
+
+                elif isinstance(
+                    value,
+                    pd.Timestamp,
+                ):
+
+                    clean_row.append(
+                        value.strftime(
+                            "%d/%m/%Y %H:%M"
+                        )
+                    )
+
+
                 elif hasattr(
                     value,
                     "item",
@@ -520,8 +657,9 @@ def save_weekly_sheet(
                     except Exception:
 
                         clean_row.append(
-                            value
+                            str(value)
                         )
+
 
                 else:
 
@@ -535,28 +673,33 @@ def save_weekly_sheet(
             )
 
 
-        # ---------------------------------------------
+        # =================================================
         # WRITE
-        # ---------------------------------------------
+        # =================================================
 
         worksheet.clear()
 
 
-        data_to_write = [
-            SHEET_HEADERS
-        ] + rows
-
-
         worksheet.update(
             range_name="A1",
-            values=data_to_write,
+            values=[
+                SHEET_HEADERS
+            ] + rows,
         )
 
 
         return True
 
 
-    except gspread.exceptions.APIError:
+    except gspread.exceptions.APIError as e:
+
+        st.error(
+            "Google Sheets API trả về lỗi."
+        )
+
+        st.code(
+            repr(e)
+        )
 
         return False
 
