@@ -549,18 +549,7 @@ total_this_week = len(
 completed_on_time = 0
 late_from_this_week = 0
 
-
 for _, row in this_week_df.iterrows():
-
-    completion = pd.to_datetime(
-        row.get(
-            "Ngày hoàn thành",
-            pd.NaT,
-        ),
-        errors="coerce",
-    )
-
-
     current_status = bool(
         row.get(
             "Trạng thái",
@@ -568,71 +557,24 @@ for _, row in this_week_df.iterrows():
         )
     )
 
-
-    # -----------------------------------------------------
-    # TASK VỪA ĐƯỢC TICK, CHƯA SAVE
-    # -----------------------------------------------------
-
-    if (
-        current_status
-        and
-        pd.isna(completion)
-        and
-        selected_year == current_year
-        and
-        selected_week == current_week
-    ):
-
-        completion = (
-            pd.Timestamp.now()
-        )
-
-
-    # -----------------------------------------------------
-    # COUNT COMPLETION
-    # -----------------------------------------------------
-
-    if pd.notna(
-        completion
-    ):
-
-        if (
-            week_start_ts
-            <= completion
-            <= week_end_ts
-        ):
-
-            completed_on_time += 1
-
-
-        elif (
-            completion
-            > week_end_ts
-        ):
-
-            late_from_this_week += 1
-
+    # Đếm dựa trên checkbox đã tích
+    if current_status:
+        completed_on_time += 1
 
 completion_percent = (
     completed_on_time
     / total_this_week
     * 100
-
     if total_this_week > 0
-
     else 0.0
 )
-
 
 pending_this_week = (
     total_this_week
     - completed_on_time
-    - late_from_this_week
 )
 
-
 if pending_this_week < 0:
-
     pending_this_week = 0
 
 
