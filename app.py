@@ -272,9 +272,6 @@ df["Ngày hoàn thành"] = pd.to_datetime(
 # SORT RESET
 # =========================================================
 
-# Quan trọng:
-# Reset phải được thực hiện TRƯỚC khi selectbox được tạo.
-
 if st.session_state.pop(
     reset_sort_key,
     False,
@@ -436,9 +433,6 @@ column_config = {
 # EDITOR RESET
 # =========================================================
 
-# Reset state editor phải được thực hiện
-# TRƯỚC khi st.data_editor được tạo.
-
 if st.session_state.pop(
     reset_editor_key,
     False,
@@ -454,7 +448,7 @@ if st.session_state.pop(
 # DATA EDITOR
 # =========================================================
 
-edited_df = sedited_df = st.data_editor(
+edited_df = st.data_editor(
     display_df,
     num_rows="dynamic",
     width="stretch",
@@ -511,8 +505,6 @@ origin_this_week = (
 )
 
 
-# Dòng vừa tạo chưa được lưu
-# chưa có Năm gốc / Tuần gốc.
 new_rows = (
     origin_year.isna()
     |
@@ -543,11 +535,10 @@ total_this_week = len(
 
 
 # =========================================================
-# WEEKLY COMPLETION METRICS
+# WEEKLY COMPLETION METRICS (Fixed logic)
 # =========================================================
 
 completed_on_time = 0
-late_from_this_week = 0
 
 for _, row in this_week_df.iterrows():
     current_status = bool(
@@ -557,7 +548,6 @@ for _, row in this_week_df.iterrows():
         )
     )
 
-    # Đếm dựa trên checkbox đã tích
     if current_status:
         completed_on_time += 1
 
@@ -647,14 +637,6 @@ st.progress(
     if total_this_week > 0
     else 0.0
 )
-
-
-if late_from_this_week > 0:
-
-    st.warning(
-        f"{late_from_this_week} công việc "
-        f"của tuần này được hoàn thành trễ."
-    )
 
 
 # =========================================================
@@ -846,9 +828,9 @@ if (
 
 
     st.dataframe(
-    preview_df,
-    width="stretch",
-    hide_index=True,
+        preview_df,
+        width="stretch",
+        hide_index=True,
     )
 
 
@@ -922,18 +904,10 @@ if (
             )
 
 
-            # ---------------------------------------------
-            # Lưu thứ tự mới
-            # ---------------------------------------------
-
             st.session_state[
                 week_key
             ] = ordered_df
 
-
-            # ---------------------------------------------
-            # Xóa preview
-            # ---------------------------------------------
 
             st.session_state.pop(
                 suggest_key,
@@ -945,13 +919,6 @@ if (
                 None,
             )
 
-
-            # ---------------------------------------------
-            # KHÔNG sửa trực tiếp sort_key/editor_key
-            # vì widget đã tồn tại trong lượt chạy này.
-            #
-            # Chỉ đặt cờ để reset ở lượt chạy sau.
-            # ---------------------------------------------
 
             st.session_state[
                 reset_sort_key
@@ -1035,16 +1002,6 @@ if st.button(
 
     if success:
 
-        # ---------------------------------------------
-        # Reload dữ liệu chính thức từ Google Sheets.
-        # Điều này giúp nhận:
-        #
-        # - Task ID mới
-        # - Năm/Tuần gốc
-        # - Ngày hoàn thành
-        # - Task carry-over
-        # ---------------------------------------------
-
         st.session_state[
             week_key
         ] = load_weekly_sheet(
@@ -1053,7 +1010,6 @@ if st.button(
         )
 
 
-        # Xóa preview cũ nếu có
         st.session_state.pop(
             suggest_key,
             None,
@@ -1065,8 +1021,6 @@ if st.button(
         )
 
 
-        # Không xóa editor trực tiếp.
-        # Yêu cầu reset ở lượt chạy sau.
         st.session_state[
             reset_editor_key
         ] = True
