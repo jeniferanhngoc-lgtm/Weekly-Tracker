@@ -1018,9 +1018,11 @@ def save_weekly_sheet(
         )
 
 
+        verify_sheet_values(worksheet, [SHEET_HEADERS] + rows)
+
         # Chỉ cập nhật bản tổng hợp SAU KHI dữ liệu task được ghi thành công.
         # Nếu bị lỗi, báo thất bại thay vì tuyên bố đồng bộ đủ hai sheet.
-        sync_performance_sheet(df_all)
+        sync_performance_sheet(df_all, spreadsheet=worksheet.spreadsheet)
 
         return True
 
@@ -1043,8 +1045,31 @@ def save_weekly_sheet(
 # BẢNG TỔNG KẾT & ĐỊNH DẠNG XANH LÁ
 # =========================================================
 
-def sync_performance_sheet(df_all):
-    spreadsheet = get_spreadsheet()
+def verify_sheet_values(sheet, expected):
+    """Đọc lại giá trị thô; bỏ qua ô trống cuối dòng do Sheets lược bỏ."""
+    actual = sheet.get_all_values(value_render_option="UNFORMATTED_VALUE")
+
+    def canonical(rows):
+        result = []
+        for row in rows:
+            cells = list(row)
+            while cells and cells[-1] == "":
+                cells.pop()
+            result.append(cells)
+        while result and not result[-1]:
+            result.pop()
+        return result
+
+    if canonical(actual) != canonical(expected):
+        raise RuntimeError(
+            f"Tab {sheet.title}: dữ liệu đọc lại không khớp dữ liệu đã gửi. "
+            "Một phần dữ liệu có thể đã được ghi; hãy kiểm tra Google Sheets."
+        )
+
+
+def sync_performance_sheet(df_all, spreadsheet=None):
+    if spreadsheet is None:
+        spreadsheet = get_spreadsheet()
     try:
         sheet = spreadsheet.worksheet(PERFORMANCE_SHEET)
     except gspread.exceptions.WorksheetNotFound:
@@ -1054,6 +1079,7 @@ def sync_performance_sheet(df_all):
     values = [PERFORMANCE_HEADERS] + report.fillna('').values.tolist()
     sheet.clear()
     sheet.update(range_name='A1', values=values)
+    verify_sheet_values(sheet, values)
     # Trang trí màu xanh lá, không dùng icon.
     spreadsheet.batch_update({'requests': [
         {'updateDimensionProperties': {'range': {'sheetId': sheet.id, 'dimension': 'COLUMNS', 'startIndex': 0, 'endIndex': 7},
