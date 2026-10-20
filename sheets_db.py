@@ -1,9 +1,12 @@
 import datetime
 import uuid
+from zoneinfo import ZoneInfo
 
 import gspread
 import pandas as pd
 import streamlit as st
+
+from weekly_performance import (STATUS_COLUMN, PERFORMANCE_SHEET, PERFORMANCE_HEADERS, classification, summary_table)
 
 
 # =========================================================
@@ -43,6 +46,7 @@ SHEET_HEADERS = [
     "Ghi chú",
     "Trạng thái",
     "Ngày hoàn thành",
+    STATUS_COLUMN,
 ]
 
 
@@ -648,7 +652,7 @@ def save_weekly_sheet(
         ].copy()
 
 
-        now = pd.Timestamp.now()
+        now = pd.Timestamp.now(tz=ZoneInfo("Asia/Ho_Chi_Minh")).tz_localize(None)
 
 
         # =================================================
@@ -934,6 +938,7 @@ def save_weekly_sheet(
         # =================================================
 
         output_df = df_all.copy()
+        output_df[STATUS_COLUMN] = output_df.apply(classification, axis=1)
 
 
         output_df[
@@ -1013,6 +1018,10 @@ def save_weekly_sheet(
         )
 
 
+        # Chỉ cập nhật bản tổng hợp SAU KHI dữ liệu task được ghi thành công.
+        # Nếu bị lỗi, báo thất bại thay vì tuyên bố đồng bộ đủ hai sheet.
+        sync_performance_sheet(df_all)
+
         return True
 
 
@@ -1028,3 +1037,34 @@ def save_weekly_sheet(
         )
 
         return False
+
+
+# =========================================================
+# BẢNG TỔNG KẾT & ĐỊNH DẠNG XANH LÁ
+# =========================================================
+
+def sync_performance_sheet(df_all):
+    spreadsheet = get_spreadsheet()
+    try:
+        sheet = spreadsheet.worksheet(PERFORMANCE_SHEET)
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = spreadsheet.add_worksheet(title=PERFORMANCE_SHEET, rows=500, cols=10)
+
+    report = summary_table(df_all)
+    values = [PERFORMANCE_HEADERS] + report.fillna('').values.tolist()
+    sheet.clear()
+    sheet.update(range_name='A1', values=values)
+    # Trang trí màu xanh lá, không dùng icon.
+    spreadsheet.batch_update({'requests': [
+        {'updateDimensionProperties': {'range': {'sheetId': sheet.id, 'dimension': 'COLUMNS', 'startIndex': 0, 'endIndex': 7},
+                                       'properties': {'pixelSize': 170}, 'fields': 'pixelSize'}},
+        {'repeatCell': {'range': {'sheetId': sheet.id, 'startRowIndex': 0, 'endRowIndex': 1, 'startColumnIndex': 0, 'endColumnIndex': 7},
+                        'cell': {'userEnteredFormat': {'backgroundColor': {'red': 0.12, 'green': 0.48, 'blue': 0.29},
+                                                       'textFormat': {'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}, 'bold': True},
+                                                       'horizontalAlignment': 'CENTER'}},
+                        'fields': 'userEnteredFormat'}},
+        {'repeatCell': {'range': {'sheetId': sheet.id, 'startRowIndex': 1, 'endRowIndex': len(values), 'startColumnIndex': 0, 'endColumnIndex': 7},
+                        'cell': {'userEnteredFormat': {'backgroundColor': {'red': 0.90, 'green': 0.97, 'blue': 0.92}}},
+                        'fields': 'userEnteredFormat.backgroundColor'}},
+    ]})
+    return report

@@ -1,4 +1,5 @@
 import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -12,6 +13,8 @@ from sheets_db import (
 from task_scheduler import (
     suggest_task_order,
 )
+from weekly_performance import week_summary, summary_table, classification
+from sheets_db import read_database
 
 
 # =========================================================
@@ -33,7 +36,7 @@ st.title(
 # CURRENT WEEK
 # =========================================================
 
-today = datetime.date.today()
+today = datetime.datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
 
 current_year, current_week, _ = (
     today.isocalendar()
@@ -538,53 +541,21 @@ total_this_week = len(
 # WEEKLY COMPLETION METRICS (Fixed logic)
 # =========================================================
 
-completed_on_time = 0
-
-for _, row in this_week_df.iterrows():
-    current_status = bool(
-        row.get(
-            "Trạng thái",
-            False,
-        )
-    )
-
-    if current_status:
-        completed_on_time += 1
-
-completion_percent = (
-    completed_on_time
-    / total_this_week
-    * 100
-    if total_this_week > 0
-    else 0.0
-)
-
-pending_this_week = (
-    total_this_week
-    - completed_on_time
-)
-
-if pending_this_week < 0:
-    pending_this_week = 0
-
-
-# =========================================================
-# CARRYOVER METRICS
-# =========================================================
-
-carryover_total = len(
-    carryover_df
-)
-
-
-carryover_done = int(
-    carryover_df[
-        "Trạng thái"
-    ]
-    .fillna(False)
-    .astype(bool)
-    .sum()
-)
+# Ngày hoàn thành phải thuộc tuần gốc; checkbox đơn thuần không đủ.
+# Khi đang chỉnh sửa mà chưa lưu, checkbox mới chỉ là bản nháp.
+start_bound = pd.Timestamp(first_day_of_week)
+end_exclusive = pd.Timestamp(last_day_of_week) + pd.Timedelta(days=1)
+completed_on_time = int((
+    this_week_df["Ngày hoàn thành"].ge(start_bound)
+    & this_week_df["Ngày hoàn thành"].lt(end_exclusive)
+).sum())
+completion_percent = (100 * completed_on_time / total_this_week) if total_this_week else None
+pending_this_week = max(0, total_this_week - completed_on_time)
+carryover_total = len(carryover_df)
+carryover_done = int((
+    carryover_df["Ngày hoàn thành"].ge(start_bound)
+    & carryover_df["Ngày hoàn thành"].lt(end_exclusive)
+).sum())
 
 
 # =========================================================
@@ -609,7 +580,7 @@ m2.metric(
     "Hoàn thành đúng tuần",
     (
         f"{completed_on_time} "
-        f"({completion_percent:.1f}%)"
+        f"({completion_percent:.1f}%)" if completion_percent is not None else "N/A"
     ),
 )
 
@@ -634,7 +605,7 @@ m5.metric(
 
 st.progress(
     completion_percent / 100
-    if total_this_week > 0
+    if completion_percent is not None
     else 0.0
 )
 
@@ -1122,3 +1093,17 @@ else:
             f"| {priority}"
             f"{deadline_text}"
         )
+
+
+# =========================================================
+# TỔNG HỢP HIỆU SUẤT TỪ DỮ LIỆU ĐÃ LƯU
+# =========================================================
+st.divider()
+with st.expander("Đánh giá hiệu suất các tuần (dữ liệu đã đồng bộ)", expanded=False):
+    try:
+        database_df, _ = read_database()
+        performance_df = summary_table(database_df)
+        st.dataframe(performance_df, hide_index=True, width="stretch")
+        st.caption("Việc tồn được đếm tại đầu tuần (00:00 thứ Hai). Tuần không có task: N/A. ")
+    except Exception as exc:
+        st.warning(f"Không tải được bảng đánh giá: {type(exc).__name__}: {exc}")
