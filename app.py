@@ -36,6 +36,10 @@ st.title(
 # CURRENT WEEK
 # =========================================================
 
+verified_message = st.session_state.pop("sync_verified_message", None)
+if verified_message:
+    st.success(verified_message)
+
 today = datetime.datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
 
 current_year, current_week, _ = (
@@ -997,9 +1001,9 @@ if st.button(
         ] = True
 
 
-        st.success(
-            "Đã lưu và đồng bộ "
-            "Google Sheets thành công!"
+        st.session_state["sync_verified_message"] = (
+            "Đã ghi và đọc lại xác nhận dữ liệu ở cả hai tab "
+            "Simple_Weekly_Tasks và Weekly_Performance."
         )
 
 
