@@ -6,6 +6,8 @@ import gspread
 import pandas as pd
 import streamlit as st
 
+from sheet_styles import style_sheet
+
 from weekly_performance import (STATUS_COLUMN, PERFORMANCE_SHEET, PERFORMANCE_HEADERS, classification, summary_table)
 
 
@@ -1007,6 +1009,7 @@ def save_weekly_sheet(
             )
 
 
+        worksheet.resize(rows=max(worksheet.row_count, len(rows) + 1), cols=max(worksheet.col_count, len(SHEET_HEADERS)))
         worksheet.clear()
 
 
@@ -1019,6 +1022,7 @@ def save_weekly_sheet(
 
 
         verify_sheet_values(worksheet, [SHEET_HEADERS] + rows)
+        style_sheet(worksheet, len(rows) + 1, len(SHEET_HEADERS))
 
         # Chỉ cập nhật bản tổng hợp SAU KHI dữ liệu task được ghi thành công.
         # Nếu bị lỗi, báo thất bại thay vì tuyên bố đồng bộ đủ hai sheet.
@@ -1077,20 +1081,9 @@ def sync_performance_sheet(df_all, spreadsheet=None):
 
     report = summary_table(df_all)
     values = [PERFORMANCE_HEADERS] + report.fillna('').values.tolist()
+    sheet.resize(rows=max(sheet.row_count, len(values)), cols=max(sheet.col_count, len(PERFORMANCE_HEADERS)))
     sheet.clear()
     sheet.update(range_name='A1', values=values)
     verify_sheet_values(sheet, values)
-    # Trang trí màu xanh lá, không dùng icon.
-    spreadsheet.batch_update({'requests': [
-        {'updateDimensionProperties': {'range': {'sheetId': sheet.id, 'dimension': 'COLUMNS', 'startIndex': 0, 'endIndex': 7},
-                                       'properties': {'pixelSize': 170}, 'fields': 'pixelSize'}},
-        {'repeatCell': {'range': {'sheetId': sheet.id, 'startRowIndex': 0, 'endRowIndex': 1, 'startColumnIndex': 0, 'endColumnIndex': 7},
-                        'cell': {'userEnteredFormat': {'backgroundColor': {'red': 0.12, 'green': 0.48, 'blue': 0.29},
-                                                       'textFormat': {'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}, 'bold': True},
-                                                       'horizontalAlignment': 'CENTER'}},
-                        'fields': 'userEnteredFormat'}},
-        {'repeatCell': {'range': {'sheetId': sheet.id, 'startRowIndex': 1, 'endRowIndex': len(values), 'startColumnIndex': 0, 'endColumnIndex': 7},
-                        'cell': {'userEnteredFormat': {'backgroundColor': {'red': 0.90, 'green': 0.97, 'blue': 0.92}}},
-                        'fields': 'userEnteredFormat.backgroundColor'}},
-    ]})
+    style_sheet(sheet, len(values), len(PERFORMANCE_HEADERS), performance=True)
     return report
