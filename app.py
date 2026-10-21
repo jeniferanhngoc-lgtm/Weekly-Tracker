@@ -1079,7 +1079,6 @@ else:
                 )
             )
 
-
             if pd.notna(
                 parsed_deadline
             ):
