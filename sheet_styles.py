@@ -4,7 +4,7 @@ def color(hex_code):
     return {name: int(hex_code[i:i+2], 16) / 255 for name, i in [('red', 1), ('green', 3), ('blue', 5)]}
 
 
-def style_sheet(sheet, row_count, column_count, performance=False):
+def style_sheet(sheet, row_count, column_count, performance=False, today=None):
     # Gọi sau khi ghi: chỉ cắt phần dòng trống, giữ toàn bộ dữ liệu vừa xác nhận.
     sheet.resize(rows=max(2, row_count))
     sid = sheet.id
@@ -29,42 +29,57 @@ def style_sheet(sheet, row_count, column_count, performance=False):
     for index in reversed(range(len(existing.get('conditionalFormats', [])))):
         requests.append({'deleteConditionalFormatRule': {'sheetId': sid, 'index': index}})
 
-    iso_year = 'YEAR(TODAY()-WEEKDAY(TODAY(),2)+4)'
-    iso_week = 'WEEKNUM(TODAY(),21)'
-    if performance:
-        current = f'$A2=TEXT({iso_year},"0000")&"-W"&TEXT({iso_week},"00")'
-        rules = [
-            (f'AND({current},$B2=100)', '#F0AD4E', '#D1E7DD'),
-            (current, '#F0AD4E', None),
-        ]
-        # Chỉ tô ô kết quả; dòng tuần vẫn giữ màu chữ theo tuần.
-        assessment_range = dict(body, startColumnIndex=4, endColumnIndex=5)
-        score_rules = [
-            ('AND(ISNUMBER($B2),$B2<40)', '#842029', '#F8D7DA'),
-            ('AND(ISNUMBER($B2),$B2>=40,$B2<80)', '#C65911', None),
-            ('AND(ISNUMBER($B2),$B2>=80)', '#198754', '#D1E7DD'),
-        ]
-    else:
-        current = f'AND($B2={iso_year},$C2={iso_week})'
-        backlog = f'AND($E2<>"",$J2="",$B2*100+$C2<{iso_year}*100+{iso_week})'
-        complete = '$K2="Hoàn thành đúng tiến độ"'
-        rules = [
-            ('$K2="Hoàn thành trễ"', '#842029', '#F8D7DA'),
-            (backlog, '#C65911', None),
-            (f'AND({current},{complete})', '#F0AD4E', '#D1E7DD'),
-            (current, '#F0AD4E', None),
-            (complete, '#198754', '#D1E7DD'),
-        ]
-        score_rules = []
-        requests.append({'updateDimensionProperties': {'range': {'sheetId': sid, 'dimension': 'COLUMNS', 'startIndex': 4, 'endIndex': 5},
-                                                       'properties': {'pixelSize': 320}, 'fields': 'pixelSize'}})
-    ordered = [(formula, fg, bg, assessment_range) for formula, fg, bg in score_rules]
-    ordered += [(formula, fg, bg, body) for formula, fg, bg in rules]
-    for index, (formula, fg, bg, target) in enumerate(ordered):
+    # Tô trực tiếp: không dùng công thức phụ thuộc locale của bảng tính.
+    import datetime
+    from zoneinfo import ZoneInfo
+    now = today or datetime.datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+    year, week, _ = now.isocalendar()
+    current_key = f"{year}-W{week:02d}"
+    values = sheet.get_all_values(value_render_option="UNFORMATTED_VALUE")
+
+    def paint(row_index, fg, bg=None, start=0, end=None):
+        target = dict(body, startRowIndex=row_index, endRowIndex=row_index+1,
+                      startColumnIndex=start, endColumnIndex=end or column_count)
         fmt = {'textFormat': {'foregroundColor': color(fg)}}
+        fields = 'userEnteredFormat.textFormat.foregroundColor'
         if bg:
             fmt['backgroundColor'] = color(bg)
-        requests.append({'addConditionalFormatRule': {'index': index, 'rule': {
-            'ranges': [target], 'booleanRule': {'condition': {'type': 'CUSTOM_FORMULA', 'values': [{'userEnteredValue': '='+formula}]},
-                                               'format': fmt}}}})
+            fields += ',userEnteredFormat.backgroundColor'
+        requests.append({'repeatCell': {'range': target, 'cell': {'userEnteredFormat': fmt}, 'fields': fields}})
+
+    for index, raw in enumerate(values[1:row_count], start=1):
+        row = list(raw) + [''] * max(0, column_count-len(raw))
+        if performance:
+            current = row[0] == current_key
+            if current:
+                paint(index, '#F0AD4E')
+            score = row[1]
+            if isinstance(score, (int, float)) and not isinstance(score, bool):
+                if score < 40:
+                    paint(index, '#842029', '#F8D7DA', 4, 5)
+                elif score < 80:
+                    paint(index, '#C65911', start=4, end=5)
+                else:
+                    paint(index, '#198754', '#D1E7DD', 4, 5)
+                    if current and score == 100:
+                        paint(index, '#F0AD4E', '#D1E7DD', 0, 4)
+                        paint(index, '#F0AD4E', '#D1E7DD', 5, column_count)
+        else:
+            try:
+                origin = int(row[1]), int(row[2])
+            except (ValueError, TypeError):
+                origin = None
+            current = origin == (year, week)
+            backlog = bool(str(row[4]).strip()) and row[9] == '' and origin is not None and origin < (year, week)
+            if row[10] == 'Hoàn thành trễ':
+                paint(index, '#842029', '#F8D7DA')
+            elif backlog:
+                paint(index, '#C65911')
+            elif row[10] == 'Hoàn thành đúng tiến độ':
+                paint(index, '#F0AD4E' if current else '#198754', '#D1E7DD')
+            elif current:
+                paint(index, '#F0AD4E')
+    if not performance:
+        requests.append({'updateDimensionProperties': {'range': {'sheetId': sid, 'dimension': 'COLUMNS', 'startIndex': 4, 'endIndex': 5},
+                                                       'properties': {'pixelSize': 320}, 'fields': 'pixelSize'}})
     sheet.spreadsheet.batch_update({'requests': requests})
